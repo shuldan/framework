@@ -13,7 +13,7 @@ Shuldan — это легковесный фреймворк для создан
 ## Быстрый старт
 
 ```go
-app := application.NewApplication(
+app := application.New(
     application.AppInfo{
         AppName:     "Example",
         Version:     "1.0.0",
