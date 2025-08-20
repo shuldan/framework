@@ -13,4 +13,7 @@ var (
 	ErrPublishOnClosedBus      = newEventCode().New("cannot publish: event bus is closed")
 	ErrInvalidBusInstance      = newEventCode().New("events bus instance must be a Bus interface")
 	ErrBusNotFound             = newEventCode().New("events bus not found")
+	ErrLoggerNotFound          = newEventCode().New("logger not found")
+	ErrLoggerRequired          = newEventCode().New("logger required")
+	ErrInvalidLoggerInstance   = newEventCode().New("logger instance must be a Logger interface")
 )

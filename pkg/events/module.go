@@ -14,9 +14,20 @@ func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
 		contracts.EventBusModuleName,
 		func(c contracts.DIContainer) (interface{}, error) {
+			logger, err := c.Resolve(contracts.LoggerModuleName)
+			if err != nil {
+				return nil, ErrLoggerNotFound.WithCause(err)
+			}
+			if logger == nil {
+				return nil, ErrLoggerRequired
+			}
+			loggerInst, ok := logger.(contracts.Logger)
+			if !ok {
+				return nil, ErrInvalidLoggerInstance
+			}
 			b := New()
-			b.WithPanicHandler(&defaultPanicHandler{})
-			b.WithErrorHandler(&defaultErrorHandler{})
+			b.WithPanicHandler(&defaultPanicHandler{logger: loggerInst})
+			b.WithErrorHandler(&defaultErrorHandler{logger: loggerInst})
 			return b, nil
 		},
 	)

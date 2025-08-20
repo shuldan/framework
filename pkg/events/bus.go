@@ -8,16 +8,20 @@ import (
 	"sync"
 )
 
-type defaultPanicHandler struct{}
-
-func (d *defaultPanicHandler) Handle(event any, listener any, panicValue any, stack []byte) {
-	// TODO: log panic
+type defaultPanicHandler struct {
+	logger contracts.Logger
 }
 
-type defaultErrorHandler struct{}
+func (d *defaultPanicHandler) Handle(event any, listener any, panicValue any, stack []byte) {
+	d.logger.Critical("event bus panic", "event", event, "listener", listener, "panic_value", panicValue, "stack", string(stack))
+}
+
+type defaultErrorHandler struct {
+	logger contracts.Logger
+}
 
 func (d *defaultErrorHandler) Handle(event any, listener any, err error) {
-	// TODO: log error
+	d.logger.Error("event bus error", "event", event, "listener", listener, "error", err)
 }
 
 type listenerAdapter struct {

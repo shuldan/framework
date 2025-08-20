@@ -1,0 +1,80 @@
+package logger
+
+import (
+	"bytes"
+	"log/slog"
+	"strings"
+	"testing"
+)
+
+func TestLoggerMethods(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger, err := NewLogger(WithWriter(buf), WithText(), WithLevel(slog.LevelDebug))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		method func(string, ...any)
+		level  slog.Level
+		prefix string
+	}{
+		{logger.Trace, levelTrace, "TRACE"},
+		{logger.Debug, slog.LevelDebug, "DEBUG"},
+		{logger.Info, slog.LevelInfo, "INFO"},
+		{logger.Warn, slog.LevelWarn, "WARN"},
+		{logger.Error, slog.LevelError, "ERROR"},
+		{logger.Critical, levelCritical, "CRITICAL"},
+	}
+
+	for _, tt := range tests {
+		buf.Reset()
+		t.Run(tt.prefix, func(t *testing.T) {
+			tt.method("test", "key", "val")
+			output := buf.String()
+			if !strings.Contains(output, tt.prefix) || !strings.Contains(output, "key=\"val\"") {
+				t.Errorf("Expected %q in output, got: %q", tt.prefix, output)
+			}
+		})
+	}
+}
+
+func TestConvertArgs_OddArgs(t *testing.T) {
+	buf := &bytes.Buffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+
+	args := []any{"key1", "val1", "key2"}
+	attrs := convertArgs(args)
+
+	if len(attrs) != 2 {
+		t.Errorf("Expected 2 attrs, got %d", len(attrs))
+	}
+	if attrs[1].Key != "MISSING_KEY" {
+		t.Errorf("Expected MISSING_KEY, got %q", attrs[1].Key)
+	}
+
+	if !strings.Contains(buf.String(), "odd number of args") {
+		t.Error("Expected odd args warning")
+	}
+}
+
+func TestConvertArgs_NonStringKey(t *testing.T) {
+	args := []any{42, "value"}
+	attrs := convertArgs(args)
+	if !strings.HasPrefix(attrs[0].Key, "NON_STRING_KEY_int") {
+		t.Errorf("Expected NON_STRING_KEY_, got %q", attrs[0].Key)
+	}
+}
+
+func TestLogger_With(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger, _ := NewLogger(WithWriter(buf), WithText())
+
+	l2 := logger.With("service", "auth")
+	l2.Info("login")
+
+	output := buf.String()
+	if !strings.Contains(output, "service=\"auth\"") {
+		t.Error("With: expected attr not found")
+	}
+}

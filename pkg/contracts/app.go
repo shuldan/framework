@@ -8,6 +8,7 @@ import (
 const (
 	CliModuleName      = "cli"
 	EventBusModuleName = "event.bus"
+	LoggerModuleName   = "logger"
 )
 
 type DIContainer interface {

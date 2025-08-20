@@ -4,13 +4,13 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type Module struct{}
+type module struct{}
 
-func (m *Module) Name() string {
+func (m *module) Name() string {
 	return "cli"
 }
 
-func (m *Module) Register(container contracts.DIContainer) error {
+func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
 		contracts.CliModuleName,
 		func(c contracts.DIContainer) (interface{}, error) {
@@ -30,7 +30,7 @@ func (m *Module) Register(container contracts.DIContainer) error {
 	)
 }
 
-func (m *Module) Start(ctx contracts.AppContext) error {
+func (m *module) Start(ctx contracts.AppContext) error {
 	c, err := ctx.Container().Resolve(contracts.CliModuleName)
 	if err != nil {
 		return err
@@ -44,6 +44,6 @@ func (m *Module) Start(ctx contracts.AppContext) error {
 	return cInst.Run(ctx)
 }
 
-func (m *Module) Stop(contracts.AppContext) error {
+func (m *module) Stop(contracts.AppContext) error {
 	return nil
 }

@@ -29,5 +29,5 @@ func New(registry contracts.CliRegistry) (contracts.Cli, error) {
 }
 
 func NewModule() contracts.AppModule {
-	return &Module{}
+	return &module{}
 }
