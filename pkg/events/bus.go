@@ -6,23 +6,8 @@ import (
 	"reflect"
 	"runtime/debug"
 	"sync"
+	"time"
 )
-
-type defaultPanicHandler struct {
-	logger contracts.Logger
-}
-
-func (d *defaultPanicHandler) Handle(event any, listener any, panicValue any, stack []byte) {
-	d.logger.Critical("event bus panic", "event", event, "listener", listener, "panic_value", panicValue, "stack", string(stack))
-}
-
-type defaultErrorHandler struct {
-	logger contracts.Logger
-}
-
-func (d *defaultErrorHandler) Handle(event any, listener any, err error) {
-	d.logger.Error("event bus error", "event", event, "listener", listener, "error", err)
-}
 
 type listenerAdapter struct {
 	listenerFunc func(context.Context, any) error
@@ -30,6 +15,13 @@ type listenerAdapter struct {
 }
 
 func (l *listenerAdapter) handleEvent(ctx context.Context, event any) error {
+	eventValue := reflect.ValueOf(event)
+	if !eventValue.Type().AssignableTo(l.eventType) {
+		return ErrInvalidEventType.
+			WithDetail("expected", l.eventType.String()).
+			WithDetail("got", eventValue.Type().String())
+	}
+
 	return l.listenerFunc(ctx, event)
 }
 
@@ -41,9 +33,10 @@ func adapterFromFunction(fn any) (*listenerAdapter, error) {
 
 	ctxType, eventType := fnType.In(0), fnType.In(1)
 	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
 
-	if !ctxType.Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
-		return nil, ErrInvalidListenerFunction.WithDetail("reason", "first argument must be context.Context")
+	if !ctxType.Implements(contextType) {
+		return nil, ErrInvalidListenerFunction.WithDetail("reason", "first argument must implement context.Context")
 	}
 	if fnType.Out(0) != errorType {
 		return nil, ErrInvalidListenerFunction.WithDetail("reason", "return type must be error")
@@ -73,9 +66,10 @@ func adapterFromMethod(receiver reflect.Value, method reflect.Method) (*listener
 	ctxType := fnType.In(1)
 	eventType := fnType.In(2)
 	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
 
-	if !ctxType.Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
-		return nil, ErrInvalidListenerMethod.WithDetail("reason", "first argument must be context.Context")
+	if !ctxType.Implements(contextType) {
+		return nil, ErrInvalidListenerMethod.WithDetail("reason", "first argument must implement context.Context")
 	}
 	if fnType.NumOut() != 1 || fnType.Out(0) != errorType {
 		return nil, ErrInvalidListenerMethod.WithDetail("reason", "must return error")
@@ -114,21 +108,30 @@ func newListenerAdapter(listener any) (*listenerAdapter, error) {
 	return nil, ErrInvalidListener
 }
 
+type eventTask struct {
+	ctx     context.Context
+	event   any
+	adapter *listenerAdapter
+}
+
 type bus struct {
 	mu           sync.RWMutex
 	listeners    map[reflect.Type][]*listenerAdapter
 	closed       bool
 	wg           sync.WaitGroup
-	panicHandler contracts.EventPanicHandler
-	errorHandler contracts.EventErrorHandler
+	panicHandler PanicHandler
+	errorHandler ErrorHandler
+	eventChan    chan eventTask
+	workerCount  int
+	asyncMode    bool
 }
 
-func (b *bus) WithPanicHandler(h contracts.EventPanicHandler) contracts.Bus {
+func (b *bus) WithPanicHandler(h PanicHandler) contracts.Bus {
 	b.panicHandler = h
 	return b
 }
 
-func (b *bus) WithErrorHandler(h contracts.EventErrorHandler) contracts.Bus {
+func (b *bus) WithErrorHandler(h ErrorHandler) contracts.Bus {
 	b.errorHandler = h
 	return b
 }
@@ -136,21 +139,12 @@ func (b *bus) WithErrorHandler(h contracts.EventErrorHandler) contracts.Bus {
 func (b *bus) Subscribe(eventTypeArg any, listener any) error {
 	eventTypeOf := reflect.TypeOf(eventTypeArg)
 	if eventTypeOf == nil {
-		return ErrInvalidEventType.
-			WithDetail("reason", "eventType is nil")
+		return ErrInvalidEventType.WithDetail("reason", "eventType is nil")
 	}
 	if eventTypeOf.Kind() != reflect.Ptr || eventTypeOf.Elem().Kind() != reflect.Struct {
-		return ErrInvalidEventType.
-			WithDetail("reason", "eventType must be a pointer to struct, e.g. (*MyEvent)(nil)")
+		return ErrInvalidEventType.WithDetail("reason", "eventType must be a pointer to struct")
 	}
 	eventType := eventTypeOf.Elem()
-
-	b.mu.RLock()
-	if b.closed {
-		b.mu.RUnlock()
-		return ErrBusClosed
-	}
-	b.mu.RUnlock()
 
 	adapter, err := newListenerAdapter(listener)
 	if err != nil {
@@ -171,7 +165,6 @@ func (b *bus) Subscribe(eventTypeArg any, listener any) error {
 	}
 
 	b.listeners[eventType] = append(b.listeners[eventType], adapter)
-
 	return nil
 }
 
@@ -194,20 +187,22 @@ func (b *bus) Publish(ctx context.Context, event any) error {
 		return nil
 	}
 
-	for _, adapter := range adapters {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					b.panicHandler.Handle(event, adapter, r, debug.Stack())
-				}
-			}()
-
-			if err := adapter.listenerFunc(ctx, event); err != nil {
-				b.errorHandler.Handle(event, adapter, err)
+	if b.asyncMode {
+		for _, adapter := range adapters {
+			select {
+			case b.eventChan <- eventTask{ctx: ctx, event: event, adapter: adapter}:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+				return ErrEventChannelBlocked
 			}
-		}()
+		}
+	} else {
+		for _, adapter := range adapters {
+			if err := b.processEventSync(ctx, event, adapter); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -220,12 +215,54 @@ func (b *bus) Close() error {
 		return nil
 	}
 	b.closed = true
-	listeners := make([]*listenerAdapter, 0)
-	for _, ls := range b.listeners {
-		listeners = append(listeners, ls...)
-	}
 	b.mu.Unlock()
 
+	if b.eventChan != nil {
+		close(b.eventChan)
+	}
+
 	b.wg.Wait()
+	return nil
+}
+
+func (b *bus) startWorkers() {
+	b.eventChan = make(chan eventTask, b.workerCount*10)
+	for i := 0; i < b.workerCount; i++ {
+		b.wg.Add(1)
+		go b.worker()
+	}
+}
+
+func (b *bus) worker() {
+	defer b.wg.Done()
+	for task := range b.eventChan {
+		b.processEvent(task)
+	}
+}
+
+func (b *bus) processEvent(task eventTask) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.panicHandler.Handle(task.event, task.adapter, r, debug.Stack())
+		}
+	}()
+
+	if err := task.adapter.handleEvent(task.ctx, task.event); err != nil {
+		b.errorHandler.Handle(task.event, task.adapter, err)
+	}
+}
+
+func (b *bus) processEventSync(ctx context.Context, event any, adapter *listenerAdapter) error {
+	defer func() {
+		if r := recover(); r != nil {
+			b.panicHandler.Handle(event, adapter, r, debug.Stack())
+		}
+	}()
+
+	if err := adapter.handleEvent(ctx, event); err != nil {
+		b.errorHandler.Handle(event, adapter, err)
+		return err
+	}
+
 	return nil
 }

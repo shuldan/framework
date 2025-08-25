@@ -3,11 +3,21 @@ package events
 import (
 	"context"
 	"errors"
-	"reflect"
+	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
 	"testing"
 	"time"
 )
+
+type noOpLogger struct{}
+
+func (l *noOpLogger) Debug(msg string, fields ...interface{})    {}
+func (l *noOpLogger) Info(msg string, fields ...interface{})     {}
+func (l *noOpLogger) Warn(msg string, fields ...interface{})     {}
+func (l *noOpLogger) Error(msg string, fields ...interface{})    {}
+func (l *noOpLogger) Critical(msg string, fields ...interface{}) {}
+func (l *noOpLogger) Trace(msg string, args ...any)              {}
+func (l *noOpLogger) With(args ...any) contracts.Logger          { return l }
 
 type TestEvent struct {
 	Message string
@@ -69,33 +79,33 @@ func (m *mockPanicHandler) Handle(event any, _ any, panicValue any, _ []byte) {
 }
 
 func TestEventBus_PublishToFunctionListener(t *testing.T) {
-	bus := New()
+	b := New()
 
-	err := bus.Subscribe((*TestEvent)(nil), testListenerFunc)
+	err := b.Subscribe((*TestEvent)(nil), testListenerFunc)
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
 
 	event := TestEvent{Message: "hello", Value: 100}
-	err = bus.Publish(context.Background(), event)
+	err = b.Publish(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_PublishToStructListener(t *testing.T) {
-	bus := New()
+	b := New()
 	listener := &TestEventListener{}
 
-	err := bus.Subscribe((*TestEvent)(nil), listener)
+	err := b.Subscribe((*TestEvent)(nil), listener)
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
 
 	event := TestEvent{Message: "update", Value: 42}
-	err = bus.Publish(context.Background(), event)
+	err = b.Publish(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
@@ -111,19 +121,19 @@ func TestEventBus_PublishToStructListener(t *testing.T) {
 	}
 	listener.Mutex.Unlock()
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_MultipleListeners(t *testing.T) {
-	bus := New()
+	b := New()
 	listener1 := &TestEventListener{}
 	listener2 := &TestEventListener{}
 
-	_ = bus.Subscribe((*TestEvent)(nil), listener1)
-	_ = bus.Subscribe((*TestEvent)(nil), listener2)
+	_ = b.Subscribe((*TestEvent)(nil), listener1)
+	_ = b.Subscribe((*TestEvent)(nil), listener2)
 
 	event := TestEvent{Message: "broadcast", Value: 1}
-	_ = bus.Publish(context.Background(), event)
+	_ = b.Publish(context.Background(), event)
 	time.Sleep(100 * time.Millisecond)
 
 	listener1.Mutex.Lock()
@@ -138,13 +148,13 @@ func TestEventBus_MultipleListeners(t *testing.T) {
 	}
 	listener2.Mutex.Unlock()
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_WrongEventType(t *testing.T) {
-	bus := New()
+	b := New()
 
-	err := bus.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEventOther) error {
+	err := b.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEventOther) error {
 		return nil
 	})
 
@@ -152,60 +162,63 @@ func TestEventBus_WrongEventType(t *testing.T) {
 		t.Fatal("expected error when event type mismatch")
 	}
 
-	if !reflect.DeepEqual(err, ErrInvalidListener.
+	expected := ErrInvalidListener.
 		WithDetail("expected_type", "events.TestEvent").
-		WithDetail("actual_type", "events.TestEventOther")) {
+		WithDetail("actual_type", "events.TestEventOther")
+
+	if !errors.Is(err, expected) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_InvalidListenerFunction(t *testing.T) {
-	bus := New()
+	b := New()
 
-	err := bus.Subscribe((*TestEvent)(nil), func(e TestEvent) error {
+	err := b.Subscribe((*TestEvent)(nil), func(e TestEvent) error {
 		return nil
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid listener function")
 	}
 
-	err = bus.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEvent) {
+	err = b.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEvent) {
 
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid return type")
 	}
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_InvalidEventType(t *testing.T) {
-	bus := New()
+	b := New()
 
-	err := bus.Subscribe("not a pointer", func(ctx context.Context, e TestEvent) error { return nil })
+	err := b.Subscribe("not a pointer", func(ctx context.Context, e TestEvent) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for invalid eventType")
 	}
 
-	err = bus.Subscribe(TestEvent{}, func(ctx context.Context, e TestEvent) error { return nil })
+	err = b.Subscribe(TestEvent{}, func(ctx context.Context, e TestEvent) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for non-pointer eventType")
 	}
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_PanicInListener(t *testing.T) {
 	panicHandler := &mockPanicHandler{}
-	bus := New()
-	bus.WithPanicHandler(panicHandler)
+	b := New(
+		WithPanicHandler(panicHandler),
+	)
 
-	_ = bus.Subscribe((*TestEvent)(nil), panicListener)
+	_ = b.Subscribe((*TestEvent)(nil), panicListener)
 
 	event := TestEvent{Message: "panic"}
-	err := bus.Publish(context.Background(), event)
+	err := b.Publish(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
@@ -220,31 +233,31 @@ func TestEventBus_PanicInListener(t *testing.T) {
 		t.Errorf("expected panic value to be set")
 	}
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_ClosedBus(t *testing.T) {
-	bus := New()
-	_ = bus.Close()
+	b := New()
+	_ = b.Close()
 
-	err := bus.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEvent) error {
+	err := b.Subscribe((*TestEvent)(nil), func(ctx context.Context, e TestEvent) error {
 		return nil
 	})
 	if !errors.Is(err, ErrBusClosed) {
 		t.Errorf("expected ErrBusClosed, got %v", err)
 	}
 
-	err = bus.Publish(context.Background(), TestEvent{})
+	err = b.Publish(context.Background(), TestEvent{})
 	if !errors.Is(err, ErrPublishOnClosedBus) {
 		t.Errorf("expected ErrPublishOnClosedBus, got %v", err)
 	}
 }
 
 func TestEventBus_ConcurrentPublish(t *testing.T) {
-	bus := New()
+	b := New()
 	listener := &TestEventListener{}
 
-	_ = bus.Subscribe((*TestEvent)(nil), listener)
+	_ = b.Subscribe((*TestEvent)(nil), listener)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -252,7 +265,7 @@ func TestEventBus_ConcurrentPublish(t *testing.T) {
 		go func(val int) {
 			defer wg.Done()
 			event := TestEvent{Message: "conc", Value: val}
-			_ = bus.Publish(context.Background(), event)
+			_ = b.Publish(context.Background(), event)
 		}(i)
 	}
 
@@ -265,15 +278,17 @@ func TestEventBus_ConcurrentPublish(t *testing.T) {
 	}
 	listener.Mutex.Unlock()
 
-	_ = bus.Close()
+	_ = b.Close()
 }
 
 func TestEventBus_ErrorHandlerCalled(t *testing.T) {
 	mockHandler := &mockErrorHandler{}
-	bus := New().WithErrorHandler(mockHandler)
+	b := New(
+		WithErrorHandler(mockHandler),
+	)
 
-	_ = bus.Subscribe((*TestEvent)(nil), errorListener)
-	_ = bus.Publish(context.Background(), TestEvent{})
+	_ = b.Subscribe((*TestEvent)(nil), errorListener)
+	_ = b.Publish(context.Background(), TestEvent{})
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -282,5 +297,43 @@ func TestEventBus_ErrorHandlerCalled(t *testing.T) {
 	}
 	if mockHandler.Err == nil {
 		t.Error("expected error")
+	}
+}
+
+func TestEventBus_NilEvent(t *testing.T) {
+	b := New()
+	err := b.Publish(context.Background(), nil)
+	if err != nil {
+		t.Errorf("publishing nil event should not error: %v", err)
+	}
+}
+
+func TestEventBus_ContextCancellation(t *testing.T) {
+	logger := &noOpLogger{}
+	b := New(
+		WithErrorHandler(NewDefaultErrorHandler(logger)),
+		WithPanicHandler(NewDefaultPanicHandler(logger)),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	listener := func(ctx context.Context, event TestEvent) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			return nil
+		}
+	}
+
+	err := b.Subscribe((*TestEvent)(nil), listener)
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	cancel()
+
+	err = b.Publish(ctx, TestEvent{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }

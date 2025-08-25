@@ -16,4 +16,5 @@ var (
 	ErrLoggerNotFound          = newEventCode().New("logger not found")
 	ErrLoggerRequired          = newEventCode().New("logger required")
 	ErrInvalidLoggerInstance   = newEventCode().New("logger instance must be a Logger interface")
+	ErrEventChannelBlocked     = newEventCode().New("event channel blocked")
 )

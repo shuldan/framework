@@ -25,9 +25,11 @@ func (m *module) Register(container contracts.DIContainer) error {
 			if !ok {
 				return nil, ErrInvalidLoggerInstance
 			}
-			b := New()
-			b.WithPanicHandler(&defaultPanicHandler{logger: loggerInst})
-			b.WithErrorHandler(&defaultErrorHandler{logger: loggerInst})
+
+			b := New(
+				WithPanicHandler(NewDefaultPanicHandler(loggerInst)),
+				WithErrorHandler(NewDefaultErrorHandler(loggerInst)),
+			)
 			return b, nil
 		},
 	)

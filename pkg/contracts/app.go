@@ -9,6 +9,7 @@ const (
 	CliModuleName      = "cli"
 	EventBusModuleName = "event.bus"
 	LoggerModuleName   = "logger"
+	ConfigModuleName   = "config"
 )
 
 type DIContainer interface {
