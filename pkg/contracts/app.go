@@ -10,6 +10,7 @@ const (
 	EventBusModuleName = "event.bus"
 	LoggerModuleName   = "logger"
 	ConfigModuleName   = "config"
+	DatabaseModuleName = "database"
 )
 
 type DIContainer interface {
