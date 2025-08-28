@@ -89,12 +89,13 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Run Gosec Security Scanner
-        uses: securego/gosec-action@v3
-        with:
-          args: ./...
-          format: sarif
-          out: gosec.sarif
+      - name: Install gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec security scan
+        run: |
+          gosec -fmt sarif -out gosec.sarif ./...
         continue-on-error: true
 
       - name: Upload SARIF file
