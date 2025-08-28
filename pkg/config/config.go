@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strconv"
 	"strings"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type MapConfig struct {

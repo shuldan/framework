@@ -2,11 +2,12 @@ package events
 
 import (
 	"context"
-	"github.com/shuldan/framework/pkg/contracts"
 	"reflect"
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type listenerAdapter struct {

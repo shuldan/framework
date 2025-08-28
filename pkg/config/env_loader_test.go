@@ -7,19 +7,39 @@ import (
 )
 
 func TestEnvConfigLoader_Load(t *testing.T) {
-	os.Setenv("APP_NAME", "testapp")
-	os.Setenv("APP_PORT", "8080")
-	os.Setenv("APP_FEATURES__ENABLED", "true")
-	os.Setenv("APP_DB__HOST", "localhost")
-	os.Setenv("APP_SLICE", "a,b,c")
-	os.Setenv("PREFIX_IGNORED", "x")
+	if err := os.Setenv("APP_NAME", "testapp"); err != nil {
+		t.Fatalf("failed to set APP_NAME: %v", err)
+	}
+	if err := os.Setenv("APP_PORT", "8080"); err != nil {
+		t.Fatalf("failed to set APP_PORT: %v", err)
+	}
+	if err := os.Setenv("APP_FEATURES__ENABLED", "true"); err != nil {
+		t.Fatalf("failed to set APP_FEATURES__ENABLED: %v", err)
+	}
+	if err := os.Setenv("APP_DB__HOST", "localhost"); err != nil {
+		t.Fatalf("failed to set APP_DB__HOST: %v", err)
+	}
+	if err := os.Setenv("APP_SLICE", "a,b,c"); err != nil {
+		t.Fatalf("failed to set APP_SLICE: %v", err)
+	}
+	if err := os.Setenv("PREFIX_IGNORED", "x"); err != nil {
+		t.Fatalf("failed to set PREFIX_IGNORED: %v", err)
+	}
 	defer func() {
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("APP_PORT")
-		os.Unsetenv("APP_FEATURES__ENABLED")
-		os.Unsetenv("APP_DB__HOST")
-		os.Unsetenv("APP_SLICE")
-		os.Unsetenv("PREFIX_IGNORED")
+		for _, key := range []string{
+			"APP_NAME",
+			"APP_PORT",
+			"APP_FEATURES__ENABLED",
+			"APP_DB__HOST",
+			"APP_SLICE",
+			"PREFIX_IGNORED",
+		} {
+			if val, exists := os.LookupEnv(key); exists {
+				if err := os.Unsetenv(key); err != nil {
+					t.Logf("failed to unset %s (value: %s): %v", key, val, err)
+				}
+			}
+		}
 	}()
 
 	loader := &EnvConfigLoader{prefix: "APP_"}

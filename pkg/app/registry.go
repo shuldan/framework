@@ -2,8 +2,9 @@ package app
 
 import (
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type registry struct {

@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -26,6 +28,23 @@ func (m *TestUserStrategyMapper) FindByIDBatch(ctx context.Context, db QueryExec
 		return []TestUserMemento{}, nil
 	}
 
+	query, args := m.buildBatchQuery(ids)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+		}
+	}()
+
+	return m.processBatchRows(rows)
+}
+
+func (m *TestUserStrategyMapper) buildBatchQuery(ids []contracts.ID) (string, []interface{}) {
 	query := "SELECT id, name, email FROM users WHERE id IN (?"
 	args := []interface{}{ids[0].String()}
 	for i := 1; i < len(ids); i++ {
@@ -33,13 +52,10 @@ func (m *TestUserStrategyMapper) FindByIDBatch(ctx context.Context, db QueryExec
 		args = append(args, ids[i].String())
 	}
 	query += ")"
+	return query, args
+}
 
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
+func (m *TestUserStrategyMapper) processBatchRows(rows *sql.Rows) ([]TestUserMemento, error) {
 	var mementos []TestUserMemento
 	for rows.Next() {
 		memento, err := m.FromRows(rows)
@@ -48,7 +64,6 @@ func (m *TestUserStrategyMapper) FindByIDBatch(ctx context.Context, db QueryExec
 		}
 		mementos = append(mementos, memento)
 	}
-
 	return mementos, rows.Err()
 }
 
@@ -58,8 +73,17 @@ func (m *TestUserStrategyMapper) FindAllMultiple(ctx context.Context, db QueryEx
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+		}
+	}()
+
+	return m.processAllRows(rows)
+}
+
+func (m *TestUserStrategyMapper) processAllRows(rows *sql.Rows) ([]TestUserMemento, error) {
 	var mementos []TestUserMemento
 	for rows.Next() {
 		memento, err := m.FromRows(rows)
@@ -68,7 +92,6 @@ func (m *TestUserStrategyMapper) FindAllMultiple(ctx context.Context, db QueryEx
 		}
 		mementos = append(mementos, memento)
 	}
-
 	return mementos, rows.Err()
 }
 
@@ -81,13 +104,35 @@ func (m *TestUserStrategyMapper) FindAllBatch(ctx context.Context, db QueryExecu
 }
 
 func (m *TestUserStrategyMapper) FindByMultiple(ctx context.Context, db QueryExecutor, criteria map[string]interface{}) ([]TestUserMemento, error) {
-	query := "SELECT id, name, email FROM users WHERE "
-	var conditions []string
-	var args []interface{}
+	query, args := m.buildFindByQuery(criteria)
 
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+		}
+	}()
+
+	return m.processFindByRows(rows)
+}
+
+func (m *TestUserStrategyMapper) buildFindByQuery(criteria map[string]interface{}) (string, []interface{}) {
+	query := "SELECT id, name, email FROM users WHERE "
+	conditions := make([]string, len(criteria))
+	args := make([]interface{}, len(criteria))
+
+	i := 0
 	for field, value := range criteria {
-		conditions = append(conditions, field+" = ?")
-		args = append(args, value)
+		if err := validateColumnName(field); err != nil {
+			return "", nil
+		}
+		conditions[i] = fmt.Sprintf("%s = ?", field)
+		args[i] = value
+		i++
 	}
 
 	query += conditions[0]
@@ -95,12 +140,10 @@ func (m *TestUserStrategyMapper) FindByMultiple(ctx context.Context, db QueryExe
 		query += " AND " + conditions[i]
 	}
 
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	return query, args
+}
 
+func (m *TestUserStrategyMapper) processFindByRows(rows *sql.Rows) ([]TestUserMemento, error) {
 	var mementos []TestUserMemento
 	for rows.Next() {
 		memento, err := m.FromRows(rows)
@@ -109,7 +152,6 @@ func (m *TestUserStrategyMapper) FindByMultiple(ctx context.Context, db QueryExe
 		}
 		mementos = append(mementos, memento)
 	}
-
 	return mementos, rows.Err()
 }
 
@@ -141,7 +183,11 @@ func (m *TestUserStrategyMapper) DeleteWithRelations(ctx context.Context, db Que
 
 func TestStrategyRepository(t *testing.T) {
 	db := setupTestDBWithUsers(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
 	repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](
@@ -149,13 +195,27 @@ func TestStrategyRepository(t *testing.T) {
 
 	ctx := context.Background()
 
+	testDefaultStrategy(t, repo)
+	testWithStrategy(t, repo, ctx)
+	testFindWithDifferentStrategies(t, repo, ctx)
+	testFindAllWithDifferentStrategies(t, repo, ctx)
+	testFindByWithDifferentStrategies(t, repo, ctx)
+	testSaveAndDeleteWithRelations(t, repo, ctx)
+	testTransactionSupport(t, mapper, ctx)
+	testInvalidIDHandling(t, repo, ctx)
+	testErrorHandlingForNonExistingEntity(t, repo, ctx)
+}
+
+func testDefaultStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID]) {
 	t.Run("Default strategy", func(t *testing.T) {
 		strategy := repo.GetStrategy()
 		if strategy != contracts.LoadingStrategyMultiple {
 			t.Errorf("expected LoadingStrategyMultiple, got %s", strategy)
 		}
 	})
+}
 
+func testWithStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("WithStrategy", func(t *testing.T) {
 		joinRepo := repo.WithStrategy(contracts.LoadingStrategyJoin)
 
@@ -169,9 +229,10 @@ func TestStrategyRepository(t *testing.T) {
 			t.Errorf("failed to save with join strategy: %v", err)
 		}
 	})
+}
 
+func testFindWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Find with different strategies", func(t *testing.T) {
-
 		user := NewTestUser(2, "Multi Strategy", "multi@example.com")
 		err := repo.Save(ctx, user)
 		if err != nil {
@@ -198,9 +259,10 @@ func TestStrategyRepository(t *testing.T) {
 			})
 		}
 	})
+}
 
+func testFindAllWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("FindAll with different strategies", func(t *testing.T) {
-
 		users := []TestUser{
 			NewTestUser(3, "User A", "a@example.com"),
 			NewTestUser(4, "User B", "b@example.com"),
@@ -233,7 +295,9 @@ func TestStrategyRepository(t *testing.T) {
 			})
 		}
 	})
+}
 
+func testFindByWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("FindBy with different strategies", func(t *testing.T) {
 		strategies := []contracts.LoadingStrategy{
 			contracts.LoadingStrategyMultiple,
@@ -260,7 +324,9 @@ func TestStrategyRepository(t *testing.T) {
 			})
 		}
 	})
+}
 
+func testSaveAndDeleteWithRelations(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Save and Delete with relations", func(t *testing.T) {
 		user := NewTestUser(5, "Relations Test", "relations@example.com")
 
@@ -290,10 +356,16 @@ func TestStrategyRepository(t *testing.T) {
 			t.Error("user should not exist after delete")
 		}
 	})
+}
 
+func testTransactionSupport(t *testing.T, mapper *TestUserStrategyMapper, ctx context.Context) {
 	t.Run("Transaction support", func(t *testing.T) {
 		database := setupTestDatabase(t)
-		defer database.Close()
+		defer func() {
+			if err := database.Close(); err != nil {
+				t.Logf("failed to close database: %v", err)
+			}
+		}()
 
 		sqlDB := database.(*sqlDatabase).db
 		setupUsersTable(t, sqlDB)
@@ -327,7 +399,9 @@ func TestStrategyRepository(t *testing.T) {
 			t.Error("user should exist after transaction commit")
 		}
 	})
+}
 
+func testInvalidIDHandling(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Invalid ID handling", func(t *testing.T) {
 		user := TestUser{
 			id:    NewIntID(0),
@@ -340,7 +414,9 @@ func TestStrategyRepository(t *testing.T) {
 			t.Error("expected error when saving user with invalid ID")
 		}
 	})
+}
 
+func testErrorHandlingForNonExistingEntity(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Error handling for non-existing entity", func(t *testing.T) {
 		nonExistingID := NewIntID(999)
 
@@ -358,7 +434,11 @@ func TestStrategyRepository(t *testing.T) {
 
 func TestStrategyRepositoryBatchOperations(t *testing.T) {
 	db := setupTestDBWithUsers(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
 	repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](
@@ -366,8 +446,12 @@ func TestStrategyRepositoryBatchOperations(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("Batch find by IDs", func(t *testing.T) {
+	testBatchFindByIDs(t, repo, ctx)
+	testBatchFindWithEmptyResult(t, repo, ctx)
+}
 
+func testBatchFindByIDs(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+	t.Run("Batch find by IDs", func(t *testing.T) {
 		users := []TestUser{
 			NewTestUser(10, "Batch User 1", "batch1@example.com"),
 			NewTestUser(11, "Batch User 2", "batch2@example.com"),
@@ -389,9 +473,10 @@ func TestStrategyRepositoryBatchOperations(t *testing.T) {
 			t.Errorf("expected name '%s', got '%s'", users[0].name, foundUser.name)
 		}
 	})
+}
 
+func testBatchFindWithEmptyResult(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Batch find with empty result", func(t *testing.T) {
-
 		_, err := repo.Find(ctx, NewIntID(999))
 		if err == nil {
 			t.Error("expected error when batch returns empty results")

@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,11 +105,52 @@ func TestBroker_Consume_ExistingGroup(t *testing.T) {
 		consumers: make(map[string][]context.CancelFunc),
 	}
 
+	setupMockExpectationsExistingGroup(mock)
+
+	var received []byte
+	var mu sync.Mutex
+	done := make(chan struct{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := b.Consume(ctx, "test", func(data []byte) error {
+		mu.Lock()
+		received = data
+		mu.Unlock()
+		close(done)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Consume failed: %v", err)
+	}
+
+	select {
+	case <-done:
+
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for message")
+	}
+
+	mu.Lock()
+	receivedStr := string(received)
+	mu.Unlock()
+
+	if receivedStr != "hello" {
+		t.Errorf("expected 'hello', got %q", receivedStr)
+	}
+
+	verifyMockCallsExistingGroup(t, mock)
+}
+
+const xReadGroupMethod = "XReadGroup"
+
+func setupMockExpectationsExistingGroup(mock *mockCmdable) {
 	mock.expect("XInfoGroups", []interface{}{"stream:test"}, []redis.XInfoGroup{
 		{Name: "consumers:test"},
 	}, nil)
 
-	mock.expect("XReadGroup", []interface{}{&redis.XReadGroupArgs{
+	mock.expect(xReadGroupMethod, []interface{}{&redis.XReadGroupArgs{
 		Group:    "consumers:test",
 		Consumer: "consumer-test-uuid",
 		Streams:  []string{"stream:test", ">"},
@@ -124,25 +166,9 @@ func TestBroker_Consume_ExistingGroup(t *testing.T) {
 	}}, nil)
 
 	mock.expect("XAck", []interface{}{"stream:test", "consumers:test", []string{"12345-0"}}, int64(1), nil)
+}
 
-	var received []byte
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
-	defer cancel()
-
-	err := b.Consume(ctx, "test", func(data []byte) error {
-		received = data
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Consume failed: %v", err)
-	}
-
-	time.Sleep(10 * time.Millisecond)
-
-	if string(received) != "hello" {
-		t.Errorf("expected 'hello', got %q", string(received))
-	}
-
+func verifyMockCallsExistingGroup(t *testing.T, mock *mockCmdable) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
@@ -151,7 +177,7 @@ func TestBroker_Consume_ExistingGroup(t *testing.T) {
 		switch call.method {
 		case "XInfoGroups":
 			haveXInfo = true
-		case "XReadGroup":
+		case xReadGroupMethod:
 			haveRead = true
 		case "XAck":
 			haveAck = true
@@ -186,7 +212,6 @@ func TestBroker_Close(t *testing.T) {
 	consumeDone := make(chan error, 1)
 	go func() {
 		err := b.Consume(ctx, "test", func(data []byte) error {
-
 			time.Sleep(100 * time.Millisecond)
 			return nil
 		})

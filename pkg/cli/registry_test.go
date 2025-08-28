@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
 	"testing"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func TestRegistry_Register(t *testing.T) {

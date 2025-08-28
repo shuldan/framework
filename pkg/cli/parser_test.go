@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"flag"
-	"github.com/shuldan/framework/pkg/contracts"
 	"testing"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type flagTestCommand struct {

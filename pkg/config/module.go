@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 

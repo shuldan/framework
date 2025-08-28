@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"os"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type cli struct {

@@ -66,11 +66,12 @@ func (r *strategyRepository[T, I, M]) Find(ctx context.Context, id I) (T, error)
 		memento, err = r.mapper.FindByIDJoin(ctx, executor, id)
 	case contracts.LoadingStrategyBatch:
 		results, batchErr := r.mapper.FindByIDBatch(ctx, executor, []contracts.ID{id})
-		if batchErr != nil {
+		switch {
+		case batchErr != nil:
 			err = batchErr
-		} else if len(results) == 0 {
+		case len(results) == 0:
 			err = sql.ErrNoRows
-		} else {
+		default:
 			memento = results[0]
 		}
 	default:
@@ -161,13 +162,18 @@ func (r *strategyRepository[T, I, M]) Exists(ctx context.Context, id I) (bool, e
 
 func (r *strategyRepository[T, I, M]) Count(ctx context.Context, criteria map[string]interface{}) (int64, error) {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", r.tableName)
-	var args []interface{}
+	args := make([]interface{}, len(criteria))
 
 	if len(criteria) > 0 {
-		var conditions []string
+		conditions := make([]string, len(criteria))
+		i := 0
 		for field, value := range criteria {
-			conditions = append(conditions, fmt.Sprintf("%s = ?", field))
-			args = append(args, value)
+			if err := validateColumnName(field); err != nil {
+				return 0, err
+			}
+			conditions[i] = fmt.Sprintf("%s = ?", field)
+			args[i] = value
+			i++
 		}
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -212,12 +218,17 @@ func (r *strategyRepository[T, I, M]) DeleteBy(ctx context.Context, criteria map
 		return 0, ErrInvalidCriteria.WithDetail("reason", "empty criteria")
 	}
 
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, len(criteria))
+	args := make([]interface{}, len(criteria))
 
+	i := 0
 	for field, value := range criteria {
-		conditions = append(conditions, fmt.Sprintf("%s = ?", field))
-		args = append(args, value)
+		if err := validateColumnName(field); err != nil {
+			return 0, err
+		}
+		conditions[i] = fmt.Sprintf("%s = ?", field)
+		args[i] = value
+		i++
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s",

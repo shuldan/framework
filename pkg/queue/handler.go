@@ -1,7 +1,8 @@
 package queue
 
 import (
-	"fmt"
+	"log/slog"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
@@ -17,7 +18,13 @@ type defaultPanicHandler struct{ logger contracts.Logger }
 
 func (d *defaultPanicHandler) Handle(job any, consumer any, panicValue any, stack []byte) {
 	if d.logger == nil {
-		panic(fmt.Sprintf("queue panic: job=%v, consumer=%v, panic=%v, stack=%s", job, consumer, panicValue, string(stack)))
+		slog.Error(
+			"queue panic",
+			"job", job,
+			"consumer", consumer,
+			"panic", panicValue,
+			"stack", string(stack),
+		)
 		return
 	}
 	if job == nil {
@@ -31,7 +38,12 @@ type defaultErrorHandler struct{ logger contracts.Logger }
 
 func (d *defaultErrorHandler) Handle(job any, consumer any, err error) {
 	if d.logger == nil {
-		panic(fmt.Sprintf("queue error: job=%v, consumer=%v, error=%v", job, consumer, err))
+		slog.Error(
+			"queue error: job=%v, consumer=%v, error=%v",
+			"job", job,
+			"consumer", consumer,
+			"error", err,
+		)
 		return
 	}
 	if job == nil {

@@ -3,13 +3,13 @@ package cli
 import (
 	"flag"
 	"fmt"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strconv"
 	"text/template"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type HelpCommand struct {
-	console  contracts.Cli
 	registry contracts.CliRegistry
 	command  string
 }

@@ -3,10 +3,17 @@ package cli
 import (
 	"bytes"
 	"context"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
+)
+
+const (
+	testAppName = "test"
+	testVersion = "1.0.0"
+	testEnv     = "test"
 )
 
 type simpleAppContext struct {
@@ -25,15 +32,15 @@ func (s *simpleAppContext) Container() contracts.DIContainer {
 }
 
 func (s *simpleAppContext) AppName() string {
-	return "test"
+	return testAppName
 }
 
 func (s *simpleAppContext) Version() string {
-	return "1.0.0"
+	return testVersion
 }
 
 func (s *simpleAppContext) Environment() string {
-	return "test"
+	return testEnv
 }
 
 func (s *simpleAppContext) StartTime() time.Time {

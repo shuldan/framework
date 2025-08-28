@@ -1,8 +1,9 @@
 package app
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type container struct {

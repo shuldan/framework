@@ -2,10 +2,11 @@ package redis
 
 import (
 	"context"
-	"github.com/redis/go-redis/v9"
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type mockCmdable struct {

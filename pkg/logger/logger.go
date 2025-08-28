@@ -1,10 +1,12 @@
 package logger
 
 import (
+	"context"
 	"fmt"
-	"github.com/shuldan/framework/pkg/contracts"
 	"log/slog"
 	"sync"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 var oddArgsWarning sync.Once
@@ -14,27 +16,27 @@ type sLogger struct {
 }
 
 func (l *sLogger) Trace(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, levelTrace, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), levelTrace, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) Debug(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, slog.LevelDebug, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), slog.LevelDebug, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) Info(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, slog.LevelInfo, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), slog.LevelInfo, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) Warn(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, slog.LevelWarn, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), slog.LevelWarn, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) Error(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, slog.LevelError, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), slog.LevelError, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) Critical(msg string, args ...any) {
-	l.Logger.LogAttrs(nil, levelCritical, msg, convertArgs(args)...)
+	l.LogAttrs(context.Background(), levelCritical, msg, convertArgs(args)...)
 }
 
 func (l *sLogger) With(args ...any) contracts.Logger {
@@ -54,7 +56,6 @@ func convertArgs(args []any) []slog.Attr {
 	for i := 0; i < len(args); i += 2 {
 		var key string
 		if i+1 >= len(args) {
-
 			keyVal := args[i]
 			attrs = append(attrs, slog.Any("MISSING_KEY", keyVal))
 			break

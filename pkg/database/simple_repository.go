@@ -63,7 +63,13 @@ func (r *simpleRepository[T, I, M]) FindAll(ctx context.Context, limit, offset i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+			// TODO: log error
+		}
+	}()
 
 	var aggregates []T
 	for rows.Next() {
@@ -83,15 +89,17 @@ func (r *simpleRepository[T, I, M]) FindBy(ctx context.Context, criteria map[str
 		return nil, ErrInvalidCriteria.WithDetail("reason", "empty criteria not allowed")
 	}
 
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, len(criteria))
+	args := make([]interface{}, len(criteria))
 
+	i := 0
 	for field, value := range criteria {
 		if err := validateColumnName(field); err != nil {
 			return nil, err
 		}
-		conditions = append(conditions, fmt.Sprintf("%s = ?", field))
-		args = append(args, value)
+		conditions[i] = fmt.Sprintf("%s = ?", field)
+		args[i] = value
+		i++
 	}
 
 	query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
@@ -102,7 +110,13 @@ func (r *simpleRepository[T, I, M]) FindBy(ctx context.Context, criteria map[str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+			// TODO: log error
+		}
+	}()
 
 	var aggregates []T
 	for rows.Next() {
@@ -133,13 +147,18 @@ func (r *simpleRepository[T, I, M]) Exists(ctx context.Context, id I) (bool, err
 
 func (r *simpleRepository[T, I, M]) Count(ctx context.Context, criteria map[string]interface{}) (int64, error) {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", r.tableName)
-	var args []interface{}
+	args := make([]interface{}, len(criteria))
 
 	if len(criteria) > 0 {
-		var conditions []string
+		conditions := make([]string, len(criteria))
+		i := 0
 		for field, value := range criteria {
-			conditions = append(conditions, fmt.Sprintf("%s = ?", field))
-			args = append(args, value)
+			if err := validateColumnName(field); err != nil {
+				return 0, err
+			}
+			conditions[i] = fmt.Sprintf("%s = ?", field)
+			args[i] = value
+			i++
 		}
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -173,7 +192,6 @@ func (r *simpleRepository[T, I, M]) Save(ctx context.Context, aggregate T) error
 	executor := r.getExecutor()
 
 	if !exists {
-
 		placeholders := make([]string, len(columns))
 		for i := range placeholders {
 			placeholders[i] = "?"
@@ -187,7 +205,6 @@ func (r *simpleRepository[T, I, M]) Save(ctx context.Context, aggregate T) error
 		_, err := executor.ExecContext(ctx, query, values...)
 		return err
 	} else {
-
 		var setParts []string
 		for _, col := range columns {
 			if col != r.mapper.IDColumn() {
@@ -240,12 +257,17 @@ func (r *simpleRepository[T, I, M]) DeleteBy(ctx context.Context, criteria map[s
 		return 0, ErrInvalidCriteria.WithDetail("reason", "empty criteria")
 	}
 
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, len(criteria))
+	args := make([]interface{}, len(criteria))
 
+	i := 0
 	for field, value := range criteria {
-		conditions = append(conditions, fmt.Sprintf("%s = ?", field))
-		args = append(args, value)
+		if err := validateColumnName(field); err != nil {
+			return 0, err
+		}
+		conditions[i] = fmt.Sprintf("%s = ?", field)
+		args[i] = value
+		i++
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s",

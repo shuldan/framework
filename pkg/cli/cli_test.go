@@ -6,10 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type mockApplicationContext struct {

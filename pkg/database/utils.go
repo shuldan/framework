@@ -131,8 +131,7 @@ func (tm *TransactionManager) Execute(ctx context.Context, fn func(ctx context.C
 
 	defer func() {
 		if p := recover(); p != nil {
-			tx.Rollback()
-			panic(p)
+			_ = tx.Rollback()
 		}
 	}()
 

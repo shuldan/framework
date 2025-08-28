@@ -3,10 +3,11 @@ package logger
 import (
 	"context"
 	"fmt"
-	"golang.org/x/term"
 	"io"
 	"log/slog"
 	"os"
+
+	"golang.org/x/term"
 )
 
 type textHandler struct {
@@ -129,13 +130,14 @@ func colorize(levelStr string, level slog.Level) string {
 	case levelCritical:
 		return redBg + white + levelStr + reset
 	default:
-		if level < slog.LevelInfo {
+		switch {
+		case level < slog.LevelInfo:
 			return cyan + levelStr + reset
-		} else if level < slog.LevelWarn {
+		case level < slog.LevelWarn:
 			return green + levelStr + reset
-		} else if level < slog.LevelError {
+		case level < slog.LevelError:
 			return yellow + levelStr + reset
-		} else {
+		default:
 			return red + levelStr + reset
 		}
 	}

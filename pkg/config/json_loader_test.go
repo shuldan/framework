@@ -2,23 +2,28 @@ package config
 
 import (
 	"errors"
-	"io/ioutil"
 	"os"
 	"testing"
 )
 
 func TestJSONConfigLoader_Load_Success(t *testing.T) {
-	tmpfile, err := ioutil.TempFile("", "config*.json")
+	tmpfile, err := os.CreateTemp("", "config*.json")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("failed to remove temp file %s: %v", tmpfile.Name(), err)
+		}
+	}()
 
 	content := `{"app": {"name": "jsonapp", "port": 8080}, "debug": true}`
 	if _, err := tmpfile.Write([]byte(content)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to write to temp file: %v", err)
 	}
-	tmpfile.Close()
+	if err := tmpfile.Close(); err != nil {
+		t.Fatalf("failed to close temp file: %v", err)
+	}
 
 	loader := NewJSONConfigLoader(tmpfile.Name())
 	config, err := loader.Load()
@@ -27,14 +32,15 @@ func TestJSONConfigLoader_Load_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if config["app"].(map[string]any)["name"] != "jsonapp" {
-		t.Errorf("expected app.name = 'jsonapp'")
+	app := config["app"].(map[string]any)
+	if app["name"].(string) != "jsonapp" {
+		t.Errorf("expected app.name = 'jsonapp', got %v", app["name"])
 	}
-	if config["app"].(map[string]any)["port"].(float64) != 8080 {
-		t.Errorf("expected app.port = 8080")
+	if app["port"].(float64) != 8080 {
+		t.Errorf("expected app.port = 8080, got %v", app["port"])
 	}
 	if config["debug"] != true {
-		t.Errorf("expected debug = true")
+		t.Errorf("expected debug = true, got %v", config["debug"])
 	}
 }
 
@@ -53,14 +59,20 @@ func TestJSONConfigLoader_Load_FileNotFound(t *testing.T) {
 func TestJSONConfigLoader_Load_InvalidJSON(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "invalid*.json")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("failed to remove temp file %s: %v", tmpfile.Name(), err)
+		}
+	}()
 
 	if _, err := tmpfile.Write([]byte("{invalid json}")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to write invalid JSON: %v", err)
 	}
-	tmpfile.Close()
+	if err := tmpfile.Close(); err != nil {
+		t.Fatalf("failed to close temp file: %v", err)
+	}
 
 	loader := NewJSONConfigLoader(tmpfile.Name())
 	_, err = loader.Load()

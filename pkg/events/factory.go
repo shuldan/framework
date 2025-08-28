@@ -1,8 +1,9 @@
 package events
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"reflect"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func NewDefaultPanicHandler(logger contracts.Logger) PanicHandler {

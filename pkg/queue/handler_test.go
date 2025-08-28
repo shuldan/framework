@@ -8,8 +8,8 @@ import (
 func TestDefaultErrorHandler(t *testing.T) {
 	h := &defaultErrorHandler{logger: nil}
 	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected log.Fatalln, but no panic")
+		if r := recover(); r != nil {
+			t.Error("expected no panic, but got", r)
 		}
 	}()
 	h.Handle("job", "consumer", errors.New("test"))
@@ -18,8 +18,8 @@ func TestDefaultErrorHandler(t *testing.T) {
 func TestDefaultPanicHandler(t *testing.T) {
 	h := &defaultPanicHandler{logger: nil}
 	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected log.Panicln, but no panic")
+		if r := recover(); r != nil {
+			t.Error("expected no panic, but got", r)
 		}
 	}()
 	h.Handle("job", "consumer", "panic", []byte("stack"))

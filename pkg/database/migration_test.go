@@ -8,6 +8,12 @@ import (
 )
 
 func TestBaseMigration(t *testing.T) {
+	testNewMigration(t)
+	testAddUpAndDown(t)
+	testMultipleQueries(t)
+}
+
+func testNewMigration(t *testing.T) {
 	t.Run("NewMigration", func(t *testing.T) {
 		migration := NewMigration("001", "create users table")
 
@@ -24,7 +30,9 @@ func TestBaseMigration(t *testing.T) {
 			t.Error("new migration should have empty down queries")
 		}
 	})
+}
 
+func testAddUpAndDown(t *testing.T) {
 	t.Run("AddUp and AddDown", func(t *testing.T) {
 		migration := NewMigration("001", "test")
 		migration.AddUp("CREATE TABLE test (id INTEGER);")
@@ -47,7 +55,9 @@ func TestBaseMigration(t *testing.T) {
 			t.Errorf("unexpected down query: %s", downQueries[0])
 		}
 	})
+}
 
+func testMultipleQueries(t *testing.T) {
 	t.Run("Multiple queries", func(t *testing.T) {
 		migration := NewMigration("002", "multiple operations")
 		migration.AddUp("CREATE TABLE users (id INTEGER);")
@@ -65,6 +75,18 @@ func TestBaseMigration(t *testing.T) {
 }
 
 func TestMigrationBuilder(t *testing.T) {
+	testCreateMigration(t)
+	testCreateTable(t)
+	testDropTable(t)
+	testAddColumn(t)
+	testCreateIndex(t)
+	testCreateUniqueIndex(t)
+	testAddForeignKey(t)
+	testChainedOperations(t)
+	testRawQueries(t)
+}
+
+func testCreateMigration(t *testing.T) {
 	t.Run("CreateMigration", func(t *testing.T) {
 		builder := CreateMigration("001", "test migration")
 		if builder == nil {
@@ -74,7 +96,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Fatal("builder migration is nil")
 		}
 	})
+}
 
+func testCreateTable(t *testing.T) {
 	t.Run("CreateTable", func(t *testing.T) {
 		migration := CreateMigration("001", "create users table").
 			CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
@@ -93,7 +117,7 @@ func TestMigrationBuilder(t *testing.T) {
 		}
 
 		if len(downQueries) != 1 {
-			t.Errorf("expected 1 down query, got %d", len(downQueries))
+			t.Errorf("expected 1 down query, got % d", len(downQueries))
 		}
 
 		expectedDown := "DROP TABLE IF EXISTS users;"
@@ -101,7 +125,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected down query:\nexpected: %s\ngot: %s", expectedDown, downQueries[0])
 		}
 	})
+}
 
+func testDropTable(t *testing.T) {
 	t.Run("DropTable", func(t *testing.T) {
 		migration := CreateMigration("002", "drop users table").
 			DropTable("users").
@@ -119,7 +145,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected down query: %v", downQueries)
 		}
 	})
+}
 
+func testAddColumn(t *testing.T) {
 	t.Run("AddColumn", func(t *testing.T) {
 		migration := CreateMigration("003", "add column").
 			AddColumn("users", "email TEXT").
@@ -138,7 +166,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected down query: %v", downQueries)
 		}
 	})
+}
 
+func testCreateIndex(t *testing.T) {
 	t.Run("CreateIndex", func(t *testing.T) {
 		migration := CreateMigration("004", "create index").
 			CreateIndex("idx_users_email", "users", "email").
@@ -157,7 +187,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected down query: %v", downQueries)
 		}
 	})
+}
 
+func testCreateUniqueIndex(t *testing.T) {
 	t.Run("CreateUniqueIndex", func(t *testing.T) {
 		migration := CreateMigration("005", "create unique index").
 			CreateUniqueIndex("idx_users_email_unique", "users", "email").
@@ -170,7 +202,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected up query: %v", upQueries)
 		}
 	})
+}
 
+func testAddForeignKey(t *testing.T) {
 	t.Run("AddForeignKey", func(t *testing.T) {
 		migration := CreateMigration("006", "add foreign key").
 			AddForeignKey("posts", "user_id", "users", "id").
@@ -189,7 +223,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("unexpected down query: %v", downQueries)
 		}
 	})
+}
 
+func testChainedOperations(t *testing.T) {
 	t.Run("ChainedOperations", func(t *testing.T) {
 		migration := CreateMigration("007", "complex migration").
 			CreateTable("categories", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
@@ -216,7 +252,9 @@ func TestMigrationBuilder(t *testing.T) {
 			t.Errorf("last down query should drop categories table: %s", downQueries[len(downQueries)-1])
 		}
 	})
+}
 
+func testRawQueries(t *testing.T) {
 	t.Run("RawQueries", func(t *testing.T) {
 		migration := CreateMigration("008", "raw queries").
 			RawUp("INSERT INTO settings (key, value) VALUES ('version', '1.0');").
@@ -246,12 +284,13 @@ func TestMigrationBuilder(t *testing.T) {
 
 func TestMigrationInterface(t *testing.T) {
 	var _ contracts.Migration = (*BaseMigration)(nil)
+	const id = "test"
 
-	migration := NewMigration("test", "test migration")
+	migration := NewMigration(id, "test migration")
 	migration.AddUp("CREATE TABLE test (id INTEGER);")
 	migration.AddDown("DROP TABLE test;")
 
-	if migration.ID() != "test" {
+	if migration.ID() != id {
 		t.Error("ID method failed")
 	}
 	if migration.Description() != "test migration" {

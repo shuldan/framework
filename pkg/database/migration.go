@@ -2,8 +2,9 @@ package database
 
 import (
 	"fmt"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strings"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type BaseMigration struct {

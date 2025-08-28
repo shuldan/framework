@@ -79,14 +79,23 @@ func (r *sqlMigrationRunner) Run(migrations []contracts.Migration) error {
 		return nil
 	}
 
+	return r.executeMigrationBatch(ctx, newMigrations, nextBatch)
+}
+
+func (r *sqlMigrationRunner) executeMigrationBatch(ctx context.Context, migrations []contracts.Migration, batch int) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return ErrFailedToBeginTransaction.WithCause(err)
 	}
-	defer tx.Rollback()
 
-	for _, migration := range newMigrations {
-		if err := r.executeMigrationUp(ctx, tx, migration, nextBatch); err != nil {
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	for _, migration := range migrations {
+		if err := r.executeMigrationUp(ctx, tx, migration, batch); err != nil {
 			return ErrMigrationFailed.
 				WithDetail("id", migration.ID()).
 				WithDetail("reason", err.Error()).
@@ -94,7 +103,12 @@ func (r *sqlMigrationRunner) Run(migrations []contracts.Migration) error {
 		}
 	}
 
-	return tx.Commit()
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	tx = nil
+	return nil
 }
 
 func (r *sqlMigrationRunner) Rollback(steps int, migrations []contracts.Migration) error {
@@ -109,6 +123,21 @@ func (r *sqlMigrationRunner) Rollback(steps int, migrations []contracts.Migratio
 		return ErrNoMigrationsToRollback
 	}
 
+	migrationMap := r.buildMigrationMap(migrations)
+	rollbackList := r.buildRollbackList(applied, steps)
+
+	return r.executeRollback(ctx, rollbackList, migrationMap)
+}
+
+func (r *sqlMigrationRunner) buildMigrationMap(migrations []contracts.Migration) map[string]contracts.Migration {
+	migrationMap := make(map[string]contracts.Migration)
+	for _, m := range migrations {
+		migrationMap[m.ID()] = m
+	}
+	return migrationMap
+}
+
+func (r *sqlMigrationRunner) buildRollbackList(applied []contracts.MigrationStatus, steps int) []contracts.MigrationStatus {
 	sort.Slice(applied, func(i, j int) bool {
 		return applied[i].Batch > applied[j].Batch ||
 			(applied[i].Batch == applied[j].Batch && applied[i].ID > applied[j].ID)
@@ -118,45 +147,60 @@ func (r *sqlMigrationRunner) Rollback(steps int, migrations []contracts.Migratio
 		steps = len(applied)
 	}
 
-	migrationMap := make(map[string]contracts.Migration)
-	for _, m := range migrations {
-		migrationMap[m.ID()] = m
-	}
+	return applied[:steps]
+}
 
+func (r *sqlMigrationRunner) executeRollback(ctx context.Context, rollbackList []contracts.MigrationStatus, migrationMap map[string]contracts.Migration) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return ErrFailedToBeginTransaction.WithCause(err)
 	}
-	defer tx.Rollback()
 
-	for i := 0; i < steps; i++ {
-		migrationStatus := applied[i]
-
-		if migration, exists := migrationMap[migrationStatus.ID]; exists {
-			for _, query := range migration.Down() {
-				trimmedQuery := strings.TrimSpace(query)
-				if trimmedQuery == "" || strings.HasPrefix(trimmedQuery, "--") {
-					continue
-				}
-
-				if _, err := tx.ExecContext(ctx, query); err != nil {
-					return ErrMigrationFailed.
-						WithDetail("id", migrationStatus.ID).
-						WithDetail("reason", "rollback query failed: "+err.Error()).
-						WithCause(err)
-				}
-			}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
 		}
+	}()
 
-		if err := r.deleteMigrationRecord(ctx, tx, migrationStatus.ID); err != nil {
-			return ErrMigrationFailed.
-				WithDetail("id", migrationStatus.ID).
-				WithDetail("reason", "failed to delete migration record").
-				WithCause(err)
+	for _, migrationStatus := range rollbackList {
+		if err := r.rollbackSingleMigration(ctx, tx, migrationStatus, migrationMap); err != nil {
+			return err
 		}
 	}
 
-	return tx.Commit()
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	tx = nil
+	return nil
+}
+
+func (r *sqlMigrationRunner) rollbackSingleMigration(ctx context.Context, tx *sql.Tx, migrationStatus contracts.MigrationStatus, migrationMap map[string]contracts.Migration) error {
+	if migration, exists := migrationMap[migrationStatus.ID]; exists {
+		for _, query := range migration.Down() {
+			trimmedQuery := strings.TrimSpace(query)
+			if trimmedQuery == "" || strings.HasPrefix(trimmedQuery, "--") {
+				continue
+			}
+
+			if _, err := tx.ExecContext(ctx, query); err != nil {
+				return ErrMigrationFailed.
+					WithDetail("id", migrationStatus.ID).
+					WithDetail("reason", "rollback query failed: "+err.Error()).
+					WithCause(err)
+			}
+		}
+	}
+
+	if err := r.deleteMigrationRecord(ctx, tx, migrationStatus.ID); err != nil {
+		return ErrMigrationFailed.
+			WithDetail("id", migrationStatus.ID).
+			WithDetail("reason", "failed to delete migration record").
+			WithCause(err)
+	}
+
+	return nil
 }
 
 func (r *sqlMigrationRunner) Status() ([]contracts.MigrationStatus, error) {
@@ -194,7 +238,12 @@ func (r *sqlMigrationRunner) getAppliedMigrations(ctx context.Context) ([]contra
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+
+	defer func() {
+		if rows != nil {
+			_ = rows.Close()
+		}
+	}()
 
 	var migrations []contracts.MigrationStatus
 	for rows.Next() {

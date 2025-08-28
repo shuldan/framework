@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"io"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type cmdContext struct {

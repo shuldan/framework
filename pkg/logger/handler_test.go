@@ -81,8 +81,16 @@ func TestColorize(t *testing.T) {
 
 func TestIsTerminal(t *testing.T) {
 	f, _ := os.CreateTemp("", "testfile")
-	defer os.Remove(f.Name())
-	defer f.Close()
+	defer func() {
+		if err := os.Remove(f.Name()); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Logf("Failed to close file: %v", err)
+		}
+	}()
 
 	if isTerminal(f) {
 		t.Error("isTerminal: temp file should not be terminal")

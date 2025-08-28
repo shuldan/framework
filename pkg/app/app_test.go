@@ -2,9 +2,10 @@ package app
 
 import (
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func TestApplication_Run_Success(t *testing.T) {
@@ -29,7 +30,11 @@ func TestApplication_Run_Success(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	a.(*app).appCtx.Stop()
+	appImpl := a.(*app)
+	appCtx := appImpl.getAppCtx()
+	if appCtx != nil {
+		appCtx.Stop()
+	}
 
 	err := <-done
 	if err != nil {
@@ -60,7 +65,11 @@ func TestApplication_GracefulTimeout(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	a.(*app).appCtx.Stop()
+	appImpl := a.(*app)
+	appCtx := appImpl.getAppCtx()
+	if appCtx != nil {
+		appCtx.Stop()
+	}
 
 	err := <-done
 	if err == nil {
@@ -98,7 +107,11 @@ func TestApplication_DoubleRun(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	a.(*app).appCtx.Stop()
+	appImpl := a.(*app)
+	appCtx := appImpl.getAppCtx()
+	if appCtx != nil {
+		appCtx.Stop()
+	}
 
 	err := <-done
 	if err != nil && !errors.Is(err, ErrAppRun) {
@@ -167,7 +180,11 @@ func TestApplication_RegisterAfterRun(t *testing.T) {
 		t.Errorf("Register should work even after Run started: %v", err)
 	}
 
-	a.(*app).appCtx.Stop()
+	appImpl := a.(*app)
+	appCtx := appImpl.getAppCtx()
+	if appCtx != nil {
+		appCtx.Stop()
+	}
 
 	<-done
 }
@@ -191,5 +208,4 @@ func TestApplication_StartError_ShutdownPreviouslyStarted(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error from failing module")
 	}
-
 }

@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"sort"
 	"sync"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type cmdRegistry struct {

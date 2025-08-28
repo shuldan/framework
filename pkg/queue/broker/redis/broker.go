@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 type broker struct {
@@ -142,7 +143,7 @@ func (b *broker) processNewMessage(
 			}
 			return
 		}
-		return // Логируем ошибку?
+		return
 	}
 
 	if len(result) == 0 || len(result[0].Messages) == 0 {
@@ -160,7 +161,6 @@ func (b *broker) processNewMessage(
 	if err == nil {
 		_ = b.client.XAck(ctx, stream, group, msg.ID)
 	}
-	// Если ошибка, сообщение останется в группе для повторной обработки
 }
 
 func (b *broker) claimStalledMessages(ctx context.Context, stream, group, consumer string, handler func([]byte) error) {
@@ -192,12 +192,11 @@ func (b *broker) claimStalledMessages(ctx context.Context, stream, group, consum
 				_ = b.client.XAck(ctx, stream, group, msg.ID)
 				continue
 			}
-			// Обрабатываем сообщение через handler
+
 			err := handler(body.Data)
 			if err == nil {
 				_ = b.client.XAck(ctx, stream, group, msg.ID)
 			}
-			// Если ошибка, сообщение останется для следующей попытки
 		}
 	}
 }
@@ -246,7 +245,7 @@ func (b *broker) trackConsumer(topic string, cancel context.CancelFunc) {
 func (b *broker) newConsumerID(topic string) string {
 	prefix := b.config.consumerPrefix
 	if prefix != "" {
-		prefix = prefix + "-"
+		prefix += "-"
 	}
 	return fmt.Sprintf("consumer-%s%s-%s", prefix, topic, uuid.New().String())
 }

@@ -3,6 +3,7 @@ package errors
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"text/template"
 	"time"
@@ -40,6 +41,10 @@ type Error struct {
 func (e *Error) Error() string {
 	defer func() {
 		if r := recover(); r != nil {
+			slog.Error("panic",
+				"error", r,
+				"stack", slog.String("stack", e.Stack),
+			)
 		}
 	}()
 
@@ -57,7 +62,7 @@ func (e *Error) Error() string {
 	o := output.String()
 	r := []rune(o)
 
-	if len(r) <= 0 {
+	if len(r) == 0 {
 		return ""
 	}
 
@@ -72,7 +77,7 @@ func (e *Error) Error() string {
 
 func (e *Error) formatSimpleMessage() string {
 	r := []rune(e.Message)
-	if len(r) <= 0 {
+	if len(r) == 0 {
 		return ""
 	}
 

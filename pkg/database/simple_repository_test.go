@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
@@ -93,13 +94,29 @@ func (m *TestUserMapper) FromRows(rows *sql.Rows) (TestUserMemento, error) {
 
 func TestSimpleRepository(t *testing.T) {
 	db := setupTestDBWithUsers(t)
-	defer db.Close()
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	mapper := &TestUserMapper{}
 	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](db, mapper)
 
 	ctx := context.Background()
 
+	testSaveAndFind(t, repo, ctx)
+	testUpdate(t, repo, ctx)
+	testFindAll(t, repo, ctx)
+	testFindBy(t, repo, ctx)
+	testCount(t, repo, ctx)
+	testDelete(t, repo, ctx)
+	testDeleteBy(t, repo, ctx)
+	testInvalidOperations(t, repo, ctx)
+}
+
+func testSaveAndFind(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Save new entity", func(t *testing.T) {
 		user := NewTestUser(1, "John Doe", "john@example.com")
 		err := repo.Save(ctx, user)
@@ -144,7 +161,9 @@ func TestSimpleRepository(t *testing.T) {
 			t.Errorf("expected ErrEntityNotFound, got %v", err)
 		}
 	})
+}
 
+func testUpdate(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Update existing entity", func(t *testing.T) {
 		user := NewTestUser(1, "Jane Doe", "jane@example.com")
 		err := repo.Save(ctx, user)
@@ -164,9 +183,10 @@ func TestSimpleRepository(t *testing.T) {
 			t.Errorf("expected email 'jane@example.com', got '%s'", foundUser.email)
 		}
 	})
+}
 
+func testFindAll(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("FindAll", func(t *testing.T) {
-
 		users := []TestUser{
 			NewTestUser(2, "Alice", "alice@example.com"),
 			NewTestUser(3, "Bob", "bob@example.com"),
@@ -188,7 +208,9 @@ func TestSimpleRepository(t *testing.T) {
 			t.Errorf("expected at least 3 users, got %d", len(allUsers))
 		}
 	})
+}
 
+func testFindBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("FindBy", func(t *testing.T) {
 		users, err := repo.FindBy(ctx, map[string]interface{}{
 			"name": "Jane Doe",
@@ -220,7 +242,9 @@ func TestSimpleRepository(t *testing.T) {
 			t.Error("expected error with invalid column name")
 		}
 	})
+}
 
+func testCount(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Count", func(t *testing.T) {
 		count, err := repo.Count(ctx, map[string]interface{}{})
 		if err != nil {
@@ -240,7 +264,9 @@ func TestSimpleRepository(t *testing.T) {
 			t.Errorf("expected 1 user named Jane Doe, got %d", count)
 		}
 	})
+}
 
+func testDelete(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Delete", func(t *testing.T) {
 		id := NewIntID(2)
 		err := repo.Delete(ctx, id)
@@ -267,9 +293,10 @@ func TestSimpleRepository(t *testing.T) {
 			t.Errorf("expected ErrEntityNotFound, got %v", err)
 		}
 	})
+}
 
+func testDeleteBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("DeleteBy", func(t *testing.T) {
-
 		user := NewTestUser(4, "Test User", "test@example.com")
 		err := repo.Save(ctx, user)
 		if err != nil {
@@ -293,7 +320,9 @@ func TestSimpleRepository(t *testing.T) {
 			t.Error("expected error with empty criteria")
 		}
 	})
+}
 
+func testInvalidOperations(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Save with invalid ID", func(t *testing.T) {
 		user := TestUser{
 			id:    NewIntID(0),
@@ -309,7 +338,11 @@ func TestSimpleRepository(t *testing.T) {
 
 func TestSimpleRepositoryWithTransaction(t *testing.T) {
 	database := setupTestDatabase(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	sqlDB := database.(*sqlDatabase).db
 	setupUsersTable(t, sqlDB)
@@ -319,6 +352,11 @@ func TestSimpleRepositoryWithTransaction(t *testing.T) {
 
 	ctx := context.Background()
 
+	testSimpleRepoTransactionCommit(t, database, repo, ctx)
+	testSimpleRepoTransactionRollback(t, database, repo, ctx)
+}
+
+func testSimpleRepoTransactionCommit(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Transaction commit", func(t *testing.T) {
 		tx, err := database.BeginTx(ctx)
 		if err != nil {
@@ -346,7 +384,9 @@ func TestSimpleRepositoryWithTransaction(t *testing.T) {
 			t.Error("user should exist after transaction commit")
 		}
 	})
+}
 
+func testSimpleRepoTransactionRollback(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	t.Run("Transaction rollback", func(t *testing.T) {
 		tx, err := database.BeginTx(ctx)
 		if err != nil {

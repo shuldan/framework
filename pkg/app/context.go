@@ -2,9 +2,10 @@ package app
 
 import (
 	"context"
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type AppInfo struct {

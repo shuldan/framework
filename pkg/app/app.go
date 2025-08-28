@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
-	"github.com/shuldan/framework/pkg/contracts"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type app struct {
@@ -15,6 +17,7 @@ type app struct {
 	registry        contracts.AppRegistry
 	info            AppInfo
 	appCtx          *appContext
+	appCtxMu        sync.RWMutex
 	isRunning       int32
 	shutdownTimeout time.Duration
 }
@@ -29,13 +32,25 @@ func (a *app) Register(module contracts.AppModule) error {
 	return a.registry.Register(module)
 }
 
+func (a *app) getAppCtx() *appContext {
+	a.appCtxMu.RLock()
+	defer a.appCtxMu.RUnlock()
+	return a.appCtx
+}
+
+func (a *app) setAppCtx(ctx *appContext) {
+	a.appCtxMu.Lock()
+	defer a.appCtxMu.Unlock()
+	a.appCtx = ctx
+}
+
 func (a *app) Run() error {
 	if !atomic.CompareAndSwapInt32(&a.isRunning, 0, 1) {
 		return ErrAppRun.WithDetail("reason", "application is already isRunning")
 	}
 
 	ctx := newAppContext(a.info, a.container)
-	a.appCtx = ctx
+	a.setAppCtx(ctx)
 
 	for _, module := range a.registry.All() {
 		if err := module.Register(a.container); err != nil {

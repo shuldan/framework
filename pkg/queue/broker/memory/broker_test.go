@@ -8,14 +8,20 @@ import (
 )
 
 func TestBroker_ProduceConsume(t *testing.T) {
-	b := New()
+	b := New(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	var received []byte
+	var mu sync.Mutex
+	done := make(chan struct{})
+
 	err := b.Consume(ctx, "test", func(data []byte) error {
+		mu.Lock()
 		received = data
+		mu.Unlock()
+		close(done)
 		return nil
 	})
 	if err != nil {
@@ -27,15 +33,24 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		t.Fatalf("Produce failed: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-done:
 
-	if string(received) != "hello" {
-		t.Errorf("expected 'hello', got %q", string(received))
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for message")
+	}
+
+	mu.Lock()
+	receivedStr := string(received)
+	mu.Unlock()
+
+	if receivedStr != "hello" {
+		t.Errorf("expected 'hello', got %q", receivedStr)
 	}
 }
 
 func TestBroker_ConcurrentConsume(t *testing.T) {
-	b := New()
+	b := New(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -70,12 +85,15 @@ func TestBroker_ConcurrentConsume(t *testing.T) {
 	case <-done:
 
 	case <-ctx.Done():
-		t.Fatalf("Timeout: expected %d messages, got %d", expected, count)
+		mu.Lock()
+		actualCount := count
+		mu.Unlock()
+		t.Fatalf("Timeout: expected %d messages, got %d", expected, actualCount)
 	}
 }
 
 func TestBroker_Close(t *testing.T) {
-	b := New()
+	b := New(nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -3,10 +3,11 @@ package events
 import (
 	"context"
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type noOpLogger struct{}

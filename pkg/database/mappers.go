@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 

@@ -2,25 +2,46 @@ package database
 
 import (
 	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/shuldan/framework/pkg/contracts"
+	"errors"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func TestMigrationRunner(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	runner := NewMigrationRunner(db)
 
+	testCreateMigrationTable(t, runner)
+	testRunEmptyMigrations(t, runner)
+	testRunSingleMigration(t, db, runner)
+	testRunMultipleMigrations(t, db, runner)
+	testSkipAppliedMigrations(t, runner)
+	testRunnerMigrationStatus(t, runner)
+	testMigrationRollback(t, runner)
+	testRollbackWithNoMigrations(t, runner)
+	testFailedMigrationRollback(t, runner)
+}
+
+func testCreateMigrationTable(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("CreateMigrationTable", func(t *testing.T) {
 		err := runner.CreateMigrationTable()
 		if err != nil {
 			t.Errorf("failed to create migration table: %v", err)
 		}
 
+		sqlRunner := runner.(*sqlMigrationRunner)
 		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&count)
+		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&count)
 		if err != nil {
 			t.Errorf("failed to check table existence: %v", err)
 		}
@@ -33,14 +54,18 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("second CreateMigrationTable call failed: %v", err)
 		}
 	})
+}
 
+func testRunEmptyMigrations(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Run empty migrations", func(t *testing.T) {
 		err := runner.Run([]contracts.Migration{})
 		if err != nil {
 			t.Errorf("running empty migrations failed: %v", err)
 		}
 	})
+}
 
+func testRunSingleMigration(t *testing.T, db *sql.DB, runner contracts.MigrationRunner) {
 	t.Run("Run single migration", func(t *testing.T) {
 		migration := CreateMigration("001", "create users table").
 			CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
@@ -69,7 +94,9 @@ func TestMigrationRunner(t *testing.T) {
 			t.Error("migration was not recorded")
 		}
 	})
+}
 
+func testRunMultipleMigrations(t *testing.T, db *sql.DB, runner contracts.MigrationRunner) {
 	t.Run("Run multiple migrations", func(t *testing.T) {
 		migration2 := CreateMigration("002", "create posts table").
 			CreateTable("posts", "id INTEGER PRIMARY KEY", "title TEXT NOT NULL", "user_id INTEGER").
@@ -113,9 +140,10 @@ func TestMigrationRunner(t *testing.T) {
 			t.Error("new batch should be greater than previous batch")
 		}
 	})
+}
 
+func testSkipAppliedMigrations(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Skip already applied migrations", func(t *testing.T) {
-
 		migration1 := CreateMigration("001", "create users table").
 			CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
 			Build()
@@ -125,8 +153,9 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("failed to run already applied migration: %v", err)
 		}
 
+		sqlRunner := runner.(*sqlMigrationRunner)
 		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE id = '001'").Scan(&count)
+		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE id = '001'").Scan(&count)
 		if err != nil {
 			t.Errorf("failed to check migration count: %v", err)
 		}
@@ -134,7 +163,9 @@ func TestMigrationRunner(t *testing.T) {
 			t.Error("migration should not be applied twice")
 		}
 	})
+}
 
+func testRunnerMigrationStatus(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Status", func(t *testing.T) {
 		status, err := runner.Status()
 		if err != nil {
@@ -159,9 +190,10 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("expected batch 1, got %d", firstMigration.Batch)
 		}
 	})
+}
 
+func testMigrationRollback(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Rollback", func(t *testing.T) {
-
 		migrations := []contracts.Migration{
 			CreateMigration("001", "create users table").
 				CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
@@ -179,8 +211,9 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("failed to rollback: %v", err)
 		}
 
+		sqlRunner := runner.(*sqlMigrationRunner)
 		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE id = '003'").Scan(&count)
+		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE id = '003'").Scan(&count)
 		if err != nil {
 			t.Errorf("failed to check migration record: %v", err)
 		}
@@ -188,7 +221,7 @@ func TestMigrationRunner(t *testing.T) {
 			t.Error("migration 003 should have been rolled back")
 		}
 
-		err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_posts_user_id'").Scan(&count)
+		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_posts_user_id'").Scan(&count)
 		if err != nil {
 			t.Errorf("failed to check index: %v", err)
 		}
@@ -201,7 +234,7 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("failed to rollback multiple steps: %v", err)
 		}
 
-		err = db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count)
+		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count)
 		if err != nil {
 			t.Errorf("failed to check migration count: %v", err)
 		}
@@ -211,7 +244,7 @@ func TestMigrationRunner(t *testing.T) {
 
 		tables := []string{"users", "posts"}
 		for _, table := range tables {
-			err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count)
+			err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count)
 			if err != nil {
 				t.Errorf("failed to check %s table: %v", table, err)
 			}
@@ -220,16 +253,19 @@ func TestMigrationRunner(t *testing.T) {
 			}
 		}
 	})
+}
 
+func testRollbackWithNoMigrations(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Rollback with no migrations", func(t *testing.T) {
 		err := runner.Rollback(1, []contracts.Migration{})
-		if err != ErrNoMigrationsToRollback {
+		if !errors.Is(err, ErrNoMigrationsToRollback) {
 			t.Errorf("expected ErrNoMigrationsToRollback, got %v", err)
 		}
 	})
+}
 
+func testFailedMigrationRollback(t *testing.T, runner contracts.MigrationRunner) {
 	t.Run("Failed migration rollback", func(t *testing.T) {
-
 		migration := CreateMigration("004", "test table").
 			CreateTable("test_table", "id INTEGER PRIMARY KEY").
 			Build()
@@ -253,12 +289,16 @@ func TestMigrationRunner(t *testing.T) {
 
 func TestMigrationRunnerTransactions(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	runner := NewMigrationRunner(db)
 
 	t.Run("Transaction rollback on failure", func(t *testing.T) {
-
 		migration1 := CreateMigration("001", "create users").
 			CreateTable("users", "id INTEGER PRIMARY KEY").
 			Build()

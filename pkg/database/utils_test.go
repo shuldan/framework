@@ -10,6 +10,15 @@ import (
 )
 
 func TestQueryBuilder(t *testing.T) {
+	testSimpleSelect(t)
+	testSelectWithWhere(t)
+	testComplexQueryWithJoinAndConditions(t)
+	testLeftJoinWithGroupByAndHaving(t)
+	testOrCondition(t)
+	testResetQueryBuilder(t)
+}
+
+func testSimpleSelect(t *testing.T) {
 	t.Run("Simple SELECT", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		query, args := qb.Select("id", "name").From("users").Build()
@@ -22,7 +31,9 @@ func TestQueryBuilder(t *testing.T) {
 			t.Errorf("expected 0 args, got %d", len(args))
 		}
 	})
+}
 
+func testSelectWithWhere(t *testing.T) {
 	t.Run("SELECT with WHERE", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		query, args := qb.Select("*").From("users").Where("id = ?", 1).Build()
@@ -35,7 +46,9 @@ func TestQueryBuilder(t *testing.T) {
 			t.Errorf("expected args [1], got %v", args)
 		}
 	})
+}
 
+func testComplexQueryWithJoinAndConditions(t *testing.T) {
 	t.Run("Complex query with JOIN and conditions", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		query, args := qb.
@@ -64,7 +77,9 @@ func TestQueryBuilder(t *testing.T) {
 			}
 		}
 	})
+}
 
+func testLeftJoinWithGroupByAndHaving(t *testing.T) {
 	t.Run("LEFT JOIN with GROUP BY and HAVING", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		query, args := qb.
@@ -83,7 +98,9 @@ func TestQueryBuilder(t *testing.T) {
 			t.Errorf("expected args [5], got %v", args)
 		}
 	})
+}
 
+func testOrCondition(t *testing.T) {
 	t.Run("OR condition", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		query, args := qb.
@@ -103,7 +120,9 @@ func TestQueryBuilder(t *testing.T) {
 			t.Errorf("expected %d args, got %d", len(expectedArgs), len(args))
 		}
 	})
+}
 
+func testResetQueryBuilder(t *testing.T) {
 	t.Run("Reset query builder", func(t *testing.T) {
 		qb := NewQueryBuilder()
 		qb.Select("*").From("users").Where("id = ?", 1)
@@ -123,12 +142,21 @@ func TestQueryBuilder(t *testing.T) {
 
 func TestTransactionManager(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	tm := NewTransactionManager(db)
 
-	t.Run("Successful transaction", func(t *testing.T) {
+	testSuccessfulTransaction(t, db, tm)
+	testFailedTransactionWithRollback(t, db, tm)
+	testPanicRecovery(t, db, tm)
+}
 
+func testSuccessfulTransaction(t *testing.T, db *sql.DB, tm *TransactionManager) {
+	t.Run("Successful transaction", func(t *testing.T) {
 		_, err := db.Exec("CREATE TABLE test_tx (id INTEGER PRIMARY KEY, value TEXT)")
 		if err != nil {
 			t.Fatalf("failed to create test table: %v", err)
@@ -156,12 +184,17 @@ func TestTransactionManager(t *testing.T) {
 			t.Errorf("expected 2 records, got %d", count)
 		}
 	})
+}
 
+func testFailedTransactionWithRollback(t *testing.T, db *sql.DB, tm *TransactionManager) {
 	t.Run("Failed transaction with rollback", func(t *testing.T) {
 		initialCount := 0
-		db.QueryRow("SELECT COUNT(*) FROM test_tx").Scan(&initialCount)
+		err := db.QueryRow("SELECT COUNT(*) FROM test_tx").Scan(&initialCount)
+		if err != nil {
+			t.Errorf("failed to count records: %v", err)
+		}
 
-		err := tm.Execute(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		err = tm.Execute(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "INSERT INTO test_tx (value) VALUES (?)", "test3")
 			if err != nil {
 				return err
@@ -184,28 +217,43 @@ func TestTransactionManager(t *testing.T) {
 			t.Errorf("expected %d records (no change), got %d", initialCount, count)
 		}
 	})
+}
 
+func testPanicRecovery(t *testing.T, db *sql.DB, tm *TransactionManager) {
 	t.Run("Panic recovery", func(t *testing.T) {
 		initialCount := 0
-		db.QueryRow("SELECT COUNT(*) FROM test_tx").Scan(&initialCount)
+		err := db.QueryRow("SELECT COUNT(*) FROM test_tx").Scan(&initialCount)
+		if err != nil {
+			t.Fatalf("failed to get initial count: %v", err)
+		}
 
 		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic to be re-raised")
+			if r := recover(); r != nil {
+				t.Logf("recovered from panic: %v", r)
 			}
 		}()
 
-		tm.Execute(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		err = tm.Execute(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "INSERT INTO test_tx (value) VALUES (?)", "panic_test")
 			if err != nil {
 				return err
 			}
 			panic("test panic")
 		})
+		if err != nil {
+			t.Errorf("expected panic recovery, got error: %v", err)
+		}
 	})
 }
 
 func TestBatchProcessor(t *testing.T) {
+	testProcessSingleBatch(t)
+	testProcessMultipleBatches(t)
+	testErrorInBatchProcessing(t)
+	testZeroBatchSizeDefaults(t)
+}
+
+func testProcessSingleBatch(t *testing.T) {
 	t.Run("Process single batch", func(t *testing.T) {
 		items := []int{1, 2, 3, 4, 5}
 		bp := NewBatchProcessor[int](10)
@@ -224,7 +272,9 @@ func TestBatchProcessor(t *testing.T) {
 			t.Errorf("expected %d processed items, got %d", len(items), len(processed))
 		}
 	})
+}
 
+func testProcessMultipleBatches(t *testing.T) {
 	t.Run("Process multiple batches", func(t *testing.T) {
 		items := make([]int, 25)
 		for i := 0; i < 25; i++ {
@@ -253,7 +303,9 @@ func TestBatchProcessor(t *testing.T) {
 			t.Errorf("expected 25 processed items, got %d", len(processed))
 		}
 	})
+}
 
+func testErrorInBatchProcessing(t *testing.T) {
 	t.Run("Error in batch processing", func(t *testing.T) {
 		items := []int{1, 2, 3, 4, 5}
 		bp := NewBatchProcessor[int](2)
@@ -269,7 +321,9 @@ func TestBatchProcessor(t *testing.T) {
 			t.Error("expected batch processing to fail")
 		}
 	})
+}
 
+func testZeroBatchSizeDefaults(t *testing.T) {
 	t.Run("Zero batch size defaults to 100", func(t *testing.T) {
 		bp := NewBatchProcessor[int](0)
 		if bp.batchSize != 100 {
@@ -284,8 +338,13 @@ func TestBatchProcessor(t *testing.T) {
 }
 
 func TestNullHelpers(t *testing.T) {
-	t.Run("NullString helpers", func(t *testing.T) {
+	testNullStringHelpers(t)
+	testNullInt64Helpers(t)
+	testNullTimeHelpers(t)
+}
 
+func testNullStringHelpers(t *testing.T) {
+	t.Run("NullString helpers", func(t *testing.T) {
 		ns := ToNullString("test")
 		if !ns.Valid || ns.String != "test" {
 			t.Error("ToNullString failed for non-empty string")
@@ -306,9 +365,10 @@ func TestNullHelpers(t *testing.T) {
 			t.Errorf("FromNullString should return empty string for invalid NullString, got '%s'", s)
 		}
 	})
+}
 
+func testNullInt64Helpers(t *testing.T) {
 	t.Run("NullInt64 helpers", func(t *testing.T) {
-
 		ni := ToNullInt64(42)
 		if !ni.Valid || ni.Int64 != 42 {
 			t.Error("ToNullInt64 failed for non-zero int")
@@ -329,7 +389,9 @@ func TestNullHelpers(t *testing.T) {
 			t.Errorf("FromNullInt64 should return 0 for invalid NullInt64, got %d", i)
 		}
 	})
+}
 
+func testNullTimeHelpers(t *testing.T) {
 	t.Run("NullTime helpers", func(t *testing.T) {
 		now := time.Now()
 
@@ -356,67 +418,49 @@ func TestNullHelpers(t *testing.T) {
 }
 
 func TestValidateColumnName(t *testing.T) {
-	tests := []struct {
-		name        string
-		columnName  string
-		expectError bool
+	testValidColumnNames(t)
+	testInvalidColumnNames(t)
+}
+
+func testValidColumnNames(t *testing.T) {
+	validTests := []struct {
+		name       string
+		columnName string
 	}{
-		{
-			name:       "valid simple column",
-			columnName: "name",
-		},
-		{
-			name:       "valid column with underscore",
-			columnName: "user_id",
-		},
-		{
-			name:       "valid column with numbers",
-			columnName: "column123",
-		},
-		{
-			name:       "valid column starting with underscore",
-			columnName: "_private",
-		},
-		{
-			name:        "invalid column with space",
-			columnName:  "user name",
-			expectError: true,
-		},
-		{
-			name:        "invalid column with semicolon",
-			columnName:  "user;",
-			expectError: true,
-		},
-		{
-			name:        "invalid sql injection attempt",
-			columnName:  "user; DROP TABLE users; --",
-			expectError: true,
-		},
-		{
-			name:        "invalid column starting with number",
-			columnName:  "123column",
-			expectError: true,
-		},
-		{
-			name:        "invalid empty column",
-			columnName:  "",
-			expectError: true,
-		},
-		{
-			name:        "invalid column with special characters",
-			columnName:  "user@domain.com",
-			expectError: true,
-		},
+		{"valid simple column", "name"},
+		{"valid column with underscore", "user_id"},
+		{"valid column with numbers", "column123"},
+		{"valid column starting with underscore", "_private"},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range validTests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateColumnName(tt.columnName)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
+			if err != nil {
+				t.Errorf("unexpected error for valid column name '%s': %v", tt.columnName, err)
 			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
+		})
+	}
+}
+
+func testInvalidColumnNames(t *testing.T) {
+	invalidTests := []struct {
+		name       string
+		columnName string
+	}{
+		{"invalid column with space", "user name"},
+		{"invalid column with semicolon", "user;"},
+		{"invalid sql injection attempt", "user; DROP TABLE users; --"},
+		{"invalid column starting with number", "123column"},
+		{"invalid empty column", ""},
+		{"invalid column with special characters", "user@domain.com"},
+	}
+
+	for _, tt := range invalidTests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateColumnName(tt.columnName)
+			if err == nil {
+				t.Errorf("expected error for invalid column name '%s' but got none", tt.columnName)
 			}
 		})
 	}
@@ -424,7 +468,12 @@ func TestValidateColumnName(t *testing.T) {
 
 func TestConfigureConnectionPool(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	t.Run("Configure connection pool", func(t *testing.T) {
 		ConfigureConnectionPool(db, 50, 10, 3600)

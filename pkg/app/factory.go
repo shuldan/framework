@@ -1,8 +1,9 @@
 package app
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func NewContainer() contracts.DIContainer {

@@ -1,9 +1,11 @@
 package database
 
 import (
-	"github.com/google/uuid"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strconv"
+
+	"github.com/google/uuid"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type UUID struct {

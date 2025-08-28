@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type noOpLogger struct{}
@@ -81,7 +82,6 @@ func TestQueue_Consume_RetryWithBackoff(t *testing.T) {
 
 	broker := &mockBroker{
 		consumeFunc: func(ctx context.Context, topic string, handler func([]byte) error) error {
-
 			_ = handler([]byte(`{"Data":"retry"}`))
 			_ = handler([]byte(`{"Data":"retry"}`))
 			_ = handler([]byte(`{"Data":"retry"}`))
@@ -98,7 +98,7 @@ func TestQueue_Consume_RetryWithBackoff(t *testing.T) {
 		WithPanicHandler(NewDefaultPanicHandler(logger)),
 	)
 
-	err := q.Consume(ctx, func(ctx context.Context, job *TestJob) error {
+	err := q.Consume(ctx, func(_ context.Context, job *TestJob) error {
 		retryCount++
 		if retryCount < 3 {
 			return errors.New("transient error")
@@ -125,7 +125,6 @@ func TestQueue_Consume_DeliverToDLQ(t *testing.T) {
 	broker := &mockBroker{
 		consumeFunc: func(ctx context.Context, topic string, handler func([]byte) error) error {
 			go func() {
-
 				time.Sleep(100 * time.Millisecond)
 
 				_ = handler([]byte(`{"Data":"dlq"}`))
@@ -151,7 +150,6 @@ func TestQueue_Consume_DeliverToDLQ(t *testing.T) {
 	)
 
 	_ = q.Consume(ctx, func(ctx context.Context, job *TestJob) error {
-
 		return errors.New("permanent error")
 	})
 

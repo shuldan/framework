@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
@@ -98,7 +99,6 @@ func TestDatabaseConnect(t *testing.T) {
 			}
 
 			if !tt.expectError {
-
 				err2 := db.Connect()
 				if err2 != nil {
 					t.Errorf("second connect failed: %v", err2)
@@ -109,7 +109,9 @@ func TestDatabaseConnect(t *testing.T) {
 					t.Errorf("ping failed: %v", err)
 				}
 
-				db.Close()
+				if err := db.Close(); err != nil {
+					t.Errorf("failed to close database: %v", err)
+				}
 			}
 		})
 	}
@@ -141,7 +143,12 @@ func TestDatabaseTransaction(t *testing.T) {
 	if err := db.Connect(); err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer db.Close()
+
+	defer func(db contracts.Database) {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}(db)
 
 	ctx := context.Background()
 
@@ -224,14 +231,12 @@ func setupTestDatabase(t *testing.T) contracts.Database {
 		t.Fatalf("failed to connect to test database: %v", err)
 	}
 
-	// Принудительно включаем WAL
 	sqlDB := db.(*sqlDatabase).db
 	_, err := sqlDB.Exec("PRAGMA journal_mode=WAL;")
 	if err != nil {
 		t.Fatalf("failed to set journal_mode=WAL: %v", err)
 	}
 
-	// Проверим, что включилось
 	var mode string
 	err = sqlDB.QueryRow("PRAGMA journal_mode;").Scan(&mode)
 	if err != nil || mode != "wal" {

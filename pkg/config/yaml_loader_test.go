@@ -11,7 +11,11 @@ func TestYamlConfigLoader_Load_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("failed to remove temp file %s: %v", tmpfile.Name(), err)
+		}
+	}()
 
 	content := `
 app:
@@ -24,7 +28,9 @@ features:
 	if _, err := tmpfile.Write([]byte(content)); err != nil {
 		t.Fatal(err)
 	}
-	tmpfile.Close()
+	if err := tmpfile.Close(); err != nil {
+		t.Errorf("error closing temp file: %v", err)
+	}
 
 	loader := NewYamlConfigLoader(tmpfile.Name())
 	config, err := loader.Load()

@@ -11,14 +11,9 @@ import (
 
 func BenchmarkSimpleRepository(b *testing.B) {
 	database := setupTestDatabaseForBenchmark(b)
-	defer database.Close()
+	defer closeDatabaseWithLog(b, database)
 
-	migration := CreateMigration("001", "create users").
-		CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT", "email TEXT").
-		Build()
-
-	err := database.Migrate([]contracts.Migration{migration})
-	if err != nil {
+	if err := createTestTable(database); err != nil {
 		b.Fatalf("failed to create table: %v", err)
 	}
 
@@ -27,6 +22,15 @@ func BenchmarkSimpleRepository(b *testing.B) {
 	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
 	ctx := context.Background()
 
+	benchmarkSave(b, repo, ctx)
+	setupUsers := setupBenchmarkUsers(b, repo, ctx)
+	benchmarkFind(b, repo, ctx, setupUsers)
+	benchmarkFindAll(b, repo, ctx)
+	benchmarkExists(b, repo, ctx, setupUsers)
+	benchmarkCount(b, repo, ctx)
+}
+
+func benchmarkSave(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	b.Run("Save", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -37,14 +41,22 @@ func BenchmarkSimpleRepository(b *testing.B) {
 			}
 		}
 	})
+}
 
+func setupBenchmarkUsers(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) []TestUser {
 	setupUsers := make([]TestUser, 1000)
 	for i := 0; i < 1000; i++ {
 		user := NewTestUser(int64(i+10000), fmt.Sprintf("Setup User %d", i), fmt.Sprintf("setup%d@example.com", i))
 		setupUsers[i] = user
-		repo.Save(ctx, user)
+		err := repo.Save(ctx, user)
+		if err != nil {
+			b.Skipf("failed to setup user #%d: %v", i, err)
+		}
 	}
+	return setupUsers
+}
 
+func benchmarkFind(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser) {
 	b.Run("Find", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -55,7 +67,9 @@ func BenchmarkSimpleRepository(b *testing.B) {
 			}
 		}
 	})
+}
 
+func benchmarkFindAll(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	b.Run("FindAll", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -65,7 +79,9 @@ func BenchmarkSimpleRepository(b *testing.B) {
 			}
 		}
 	})
+}
 
+func benchmarkExists(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser) {
 	b.Run("Exists", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -76,7 +92,9 @@ func BenchmarkSimpleRepository(b *testing.B) {
 			}
 		}
 	})
+}
 
+func benchmarkCount(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
 	b.Run("Count", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -90,14 +108,9 @@ func BenchmarkSimpleRepository(b *testing.B) {
 
 func BenchmarkStrategyRepository(b *testing.B) {
 	database := setupTestDatabaseForBenchmark(b)
-	defer database.Close()
+	defer closeDatabaseWithLog(b, database)
 
-	migration := CreateMigration("001", "create users").
-		CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT", "email TEXT").
-		Build()
-
-	err := database.Migrate([]contracts.Migration{migration})
-	if err != nil {
+	if err := createTestTable(database); err != nil {
 		b.Fatalf("failed to create table: %v", err)
 	}
 
@@ -105,12 +118,20 @@ func BenchmarkStrategyRepository(b *testing.B) {
 	mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
 	ctx := context.Background()
 
+	setupUsers := setupStrategyBenchmarkUsers(ctx)
+	benchmarkStrategies(b, sqlDB, mapper, ctx, setupUsers)
+}
+
+func setupStrategyBenchmarkUsers(ctx context.Context) []TestUser {
 	setupUsers := make([]TestUser, 100)
 	for i := 0; i < 100; i++ {
 		user := NewTestUser(int64(i+1), fmt.Sprintf("User %d", i), fmt.Sprintf("user%d@example.com", i))
 		setupUsers[i] = user
 	}
+	return setupUsers
+}
 
+func benchmarkStrategies(b *testing.B, sqlDB *sql.DB, mapper *TestUserStrategyMapper, ctx context.Context, setupUsers []TestUser) {
 	strategies := []contracts.LoadingStrategy{
 		contracts.LoadingStrategyMultiple,
 		contracts.LoadingStrategyJoin,
@@ -121,36 +142,52 @@ func BenchmarkStrategyRepository(b *testing.B) {
 		repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper, strategy)
 
 		for _, user := range setupUsers {
-			repo.Save(ctx, user)
+			if err := repo.Save(ctx, user); err != nil {
+				b.Skipf("failed to setup user with strategy %v: %v", strategy, err)
+			}
 		}
 
-		b.Run(fmt.Sprintf("Find_%s", strategy), func(b *testing.B) {
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				idx := i % len(setupUsers)
-				_, err := repo.Find(ctx, setupUsers[idx].id)
-				if err != nil {
-					b.Errorf("find failed: %v", err)
-				}
-			}
-		})
-
-		b.Run(fmt.Sprintf("FindAll_%s", strategy), func(b *testing.B) {
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				_, err := repo.FindAll(ctx, 50, 0)
-				if err != nil {
-					b.Errorf("findall failed: %v", err)
-				}
-			}
-		})
+		benchmarkStrategyFind(b, repo, ctx, setupUsers, strategy)
+		benchmarkStrategyFindAll(b, repo, ctx, strategy)
 	}
+}
+
+func benchmarkStrategyFind(b *testing.B, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser, strategy contracts.LoadingStrategy) {
+	b.Run(fmt.Sprintf("Find_%s", strategy), func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			idx := i % len(setupUsers)
+			_, err := repo.Find(ctx, setupUsers[idx].id)
+			if err != nil {
+				b.Errorf("find failed for strategy %v: %v", strategy, err)
+			}
+		}
+	})
+}
+
+func benchmarkStrategyFindAll(b *testing.B, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context, strategy contracts.LoadingStrategy) {
+	b.Run(fmt.Sprintf("FindAll_%s", strategy), func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := repo.FindAll(ctx, 50, 0)
+			if err != nil {
+				b.Errorf("findall failed for strategy %v: %v", strategy, err)
+			}
+		}
+	})
 }
 
 func BenchmarkMigrationRunner(b *testing.B) {
 	b.Run("Migration execution", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			database := setupTestDatabaseForBenchmark(b)
+
+			defer func(db contracts.Database) {
+				if err := db.Close(); err != nil {
+					b.Logf("failed to close database during migration benchmark: %v", err)
+				}
+			}(database)
+
 			runner := database.GetMigrationRunner()
 
 			migration := CreateMigration(fmt.Sprintf("bench_%d", i), "benchmark migration").
@@ -159,15 +196,18 @@ func BenchmarkMigrationRunner(b *testing.B) {
 
 			err := runner.Run([]contracts.Migration{migration})
 			if err != nil {
-				b.Errorf("migration failed: %v", err)
+				b.Errorf("migration failed on iteration %d: %v", i, err)
 			}
-
-			database.Close()
 		}
 	})
 }
 
 func BenchmarkQueryBuilder(b *testing.B) {
+	benchmarkSimpleQueryBuilding(b)
+	benchmarkComplexQueryBuilding(b)
+}
+
+func benchmarkSimpleQueryBuilding(b *testing.B) {
 	b.Run("Simple query building", func(b *testing.B) {
 		qb := NewQueryBuilder()
 		b.ResetTimer()
@@ -177,7 +217,9 @@ func BenchmarkQueryBuilder(b *testing.B) {
 			qb.Select("*").From("users").Where("id = ?", i).Build()
 		}
 	})
+}
 
+func benchmarkComplexQueryBuilding(b *testing.B) {
 	b.Run("Complex query building", func(b *testing.B) {
 		qb := NewQueryBuilder()
 		b.ResetTimer()
@@ -199,12 +241,15 @@ func BenchmarkQueryBuilder(b *testing.B) {
 
 func BenchmarkTransactionManager(b *testing.B) {
 	database := setupTestDatabaseForBenchmark(b)
-	defer database.Close()
+	defer closeDatabaseWithLog(b, database)
 
 	sqlDB := database.(*sqlDatabase).db
 	tm := NewTransactionManager(sqlDB)
 
-	sqlDB.Exec("CREATE TABLE bench_tx (id INTEGER PRIMARY KEY, value TEXT)")
+	_, err := sqlDB.Exec("CREATE TABLE IF NOT EXISTS bench_tx (id INTEGER PRIMARY KEY, value TEXT)")
+	if err != nil {
+		b.Fatalf("failed to create bench_tx table: %v", err)
+	}
 
 	ctx := context.Background()
 
@@ -226,4 +271,18 @@ func setupTestDatabaseForBenchmark(tb testing.TB) contracts.Database {
 		tb.Fatalf("failed to connect to test database: %v", err)
 	}
 	return database
+}
+
+func closeDatabaseWithLog(tb testing.TB, database contracts.Database) {
+	if err := database.Close(); err != nil {
+		tb.Logf("failed to close database: %v", err)
+	}
+}
+
+func createTestTable(database contracts.Database) error {
+	migration := CreateMigration("001", "create users").
+		CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT", "email TEXT").
+		Build()
+
+	return database.Migrate([]contracts.Migration{migration})
 }

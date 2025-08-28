@@ -2,8 +2,9 @@ package app
 
 import (
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"testing"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type mockModule struct {

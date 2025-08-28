@@ -2,14 +2,17 @@ package app
 
 import (
 	"errors"
-	"github.com/shuldan/framework/pkg/contracts"
 	"sync"
 	"testing"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func TestContainer_ResolveInstance(t *testing.T) {
 	c := NewContainer()
-	c.Instance("test", "hello")
+	if err := c.Instance("test", "hello"); err != nil {
+		t.Fatalf("Instance failed: %v", err)
+	}
 
 	val, err := c.Resolve("test")
 	if err != nil {
@@ -23,9 +26,11 @@ func TestContainer_ResolveInstance(t *testing.T) {
 
 func TestContainer_ResolveFactory(t *testing.T) {
 	c := NewContainer()
-	c.Factory("greet", func(c contracts.DIContainer) (interface{}, error) {
+	if err := c.Factory("greet", func(c contracts.DIContainer) (interface{}, error) {
 		return "Hello from factory!", nil
-	})
+	}); err != nil {
+		t.Errorf("Factor failed: %v", err)
+	}
 
 	val, err := c.Resolve("greet")
 	if err != nil {
@@ -39,20 +44,24 @@ func TestContainer_ResolveFactory(t *testing.T) {
 
 func TestContainer_CircularDependency(t *testing.T) {
 	c := NewContainer()
-	c.Factory("a", func(c contracts.DIContainer) (interface{}, error) {
+	if err := c.Factory("a", func(c contracts.DIContainer) (interface{}, error) {
 		b, err := c.Resolve("b")
 		if err != nil {
 			return nil, err
 		}
 		return "a" + b.(string), nil
-	})
-	c.Factory("b", func(c contracts.DIContainer) (interface{}, error) {
+	}); err != nil {
+		t.Fatalf("Factory failed: %v", err)
+	}
+	if err := c.Factory("b", func(c contracts.DIContainer) (interface{}, error) {
 		a, err := c.Resolve("a")
 		if err != nil {
 			return nil, err
 		}
 		return "b" + a.(string), nil
-	})
+	}); err != nil {
+		t.Fatalf("Factor failed: %v", err)
+	}
 
 	_, err := c.Resolve("a")
 	if err == nil {
@@ -71,22 +80,30 @@ func TestContainer_Has(t *testing.T) {
 		t.Error("Expected false for nonexistent key")
 	}
 
-	c.Instance("instance", "value")
+	if err := c.Instance("instance", "value"); err != nil {
+		t.Fatalf("Instance failed: %v", err)
+	}
 	if !c.Has("instance") {
 		t.Error("Expected true for existing instance")
 	}
 
-	c.Factory("factory", func(contracts.DIContainer) (interface{}, error) {
+	if err := c.Factory("factory", func(contracts.DIContainer) (interface{}, error) {
 		return "factory_value", nil
-	})
+	}); err != nil {
+		t.Errorf("Factory failed: %v", err)
+	}
 	if !c.Has("factory") {
 		t.Error("Expected true for existing factory")
 	}
 
-	c.Instance("both", "instance_value")
-	c.Factory("both_factory", func(contracts.DIContainer) (interface{}, error) {
+	if err := c.Instance("both", "instance_value"); err != nil {
+		t.Errorf("Instance failed: %v", err)
+	}
+	if err := c.Factory("both_factory", func(contracts.DIContainer) (interface{}, error) {
 		return "factory_value", nil
-	})
+	}); err != nil {
+		t.Errorf("Factory failed: %v", err)
+	}
 	if !c.Has("both") {
 		t.Error("Expected true for existing instance in both maps")
 	}
@@ -167,9 +184,11 @@ func TestContainer_FactoryErrorPropagation(t *testing.T) {
 	c := NewContainer()
 
 	testErr := errors.New("factory error")
-	c.Factory("error_factory", func(contracts.DIContainer) (interface{}, error) {
+	if err := c.Factory("error_factory", func(contracts.DIContainer) (interface{}, error) {
 		return nil, testErr
-	})
+	}); err != nil {
+		t.Errorf("Factory failed: %v", err)
+	}
 
 	_, err := c.Resolve("error_factory")
 	if err == nil {
@@ -184,9 +203,11 @@ func TestContainer_FactoryErrorPropagation(t *testing.T) {
 func TestContainer_ConcurrentAccess(t *testing.T) {
 	c := NewContainer()
 
-	c.Factory("counter", func(contracts.DIContainer) (interface{}, error) {
+	if err := c.Factory("counter", func(contracts.DIContainer) (interface{}, error) {
 		return 1, nil
-	})
+	}); err != nil {
+		t.Errorf("Factory failed: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	const goroutines = 100

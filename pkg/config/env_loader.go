@@ -56,7 +56,6 @@ func setNested(m map[string]any, key string, value any) {
 			if next, ok := current[k].(map[string]any); ok {
 				current = next
 			} else {
-
 				current[k] = make(map[string]any)
 				current = current[k].(map[string]any)
 			}

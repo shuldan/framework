@@ -1,8 +1,9 @@
 package queue
 
 import (
-	"github.com/shuldan/framework/pkg/contracts"
 	"reflect"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func NewDefaultErrorHandler(logger contracts.Logger) ErrorHandler {

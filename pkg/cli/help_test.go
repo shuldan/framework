@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"flag"
-	"github.com/shuldan/framework/pkg/contracts"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type helpAppContext struct {
@@ -23,15 +24,15 @@ func (h *helpAppContext) Container() contracts.DIContainer {
 }
 
 func (h *helpAppContext) AppName() string {
-	return "test"
+	return testAppName
 }
 
 func (h *helpAppContext) Version() string {
-	return "1.0.0"
+	return testVersion
 }
 
 func (h *helpAppContext) Environment() string {
-	return "test"
+	return testEnv
 }
 
 func (h *helpAppContext) StartTime() time.Time {
