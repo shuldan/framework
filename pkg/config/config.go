@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -47,12 +48,21 @@ func (c *MapConfig) GetInt(key string, defaultVal ...int) int {
 		return i
 	}
 	if i, ok := v.(int64); ok {
+		if i < int64(math.MinInt) || i > int64(math.MaxInt) {
+			return getFirst(defaultVal)
+		}
 		return int(i)
 	}
 	if i, ok := v.(uint64); ok {
+		if i > uint64(math.MaxInt) {
+			return getFirst(defaultVal)
+		}
 		return int(i)
 	}
 	if f, ok := v.(float64); ok {
+		if f < float64(math.MinInt) || f > float64(math.MaxInt) {
+			return getFirst(defaultVal)
+		}
 		return int(f)
 	}
 	if b, ok := v.(bool); ok {
@@ -81,9 +91,15 @@ func (c *MapConfig) GetInt64(key string, defaultVal ...int64) int64 {
 		return int64(i)
 	}
 	if i, ok := v.(uint64); ok {
+		if i > math.MaxInt64 {
+			return getFirst(defaultVal)
+		}
 		return int64(i)
 	}
 	if f, ok := v.(float64); ok {
+		if f < float64(math.MinInt64) || f > float64(math.MaxInt64) {
+			return getFirst(defaultVal)
+		}
 		return int64(f)
 	}
 	if b, ok := v.(bool); ok {

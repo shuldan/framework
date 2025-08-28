@@ -22,7 +22,7 @@ $(GOIMPORTS):
 
 $(GOSEC):
 	@echo "Installing gosec..."
-	@go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	@go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 # Lint: проверка стиля и ошибок
 lint: $(GOLANGCI_LINT)

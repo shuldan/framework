@@ -7,7 +7,7 @@ import (
 )
 
 func TestYamlConfigLoader_Load_Success(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "config*.yaml")
+	tmpfile, err := os.CreateTemp(".", "config*.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

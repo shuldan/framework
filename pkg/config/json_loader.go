@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 type JSONConfigLoader struct {
@@ -10,12 +12,36 @@ type JSONConfigLoader struct {
 }
 
 func (l *JSONConfigLoader) Load() (map[string]any, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = "."
+	}
+	secureBase, err := filepath.Abs(wd)
+	if err != nil {
+		secureBase = "/"
+	}
+	secureBase = filepath.Clean(secureBase)
+
 	for _, path := range l.paths {
-		if !fileExists(path) {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		absPath = filepath.Clean(absPath)
+
+		if !strings.HasPrefix(absPath, secureBase+string(filepath.Separator)) {
 			continue
 		}
 
-		data, err := os.ReadFile(path)
+		if strings.Contains(absPath, "..") {
+			continue
+		}
+
+		if !fileExists(absPath) {
+			continue
+		}
+
+		data, err := os.ReadFile(absPath)
 		if err != nil {
 			continue
 		}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestJSONConfigLoader_Load_Success(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "config*.json")
+	tmpfile, err := os.CreateTemp(".", "config*.json")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestJSONConfigLoader_Load_FileNotFound(t *testing.T) {
 }
 
 func TestJSONConfigLoader_Load_InvalidJSON(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "invalid*.json")
+	tmpfile, err := os.CreateTemp(".", "invalid*.json") // <--- "." вместо ""
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
