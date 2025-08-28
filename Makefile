@@ -1,27 +1,38 @@
-.PHONY: lint fmt fmt-check test test-coverage vet all ci
+.PHONY: lint fmt fmt-check test test-coverage vet all ci install-tools
 
-# Путь к бинарникам (если используешь go install)
+# Путь к бинарникам
 GOBIN := $(shell go env GOPATH)/bin
 
-# Бинарники
+# Инструменты
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 GOIMPORTS := $(GOBIN)/goimports
+GOSEC := $(GOBIN)/gosec
 
-# Убедимся, что golangci-lint установлен (совместимо с Go 1.24+)
+# Установка инструментов
+install-tools: $(GOLANGCI_LINT) $(GOIMPORTS) $(GOSEC)
+
 $(GOLANGCI_LINT):
 	@echo "Installing golangci-lint v2.4.0..."
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
-	GOBIN=$(GOBIN) sh -s -- -b $(GOBIN) v2.4.0
+		sh -s -- -b $(GOBIN) v2.4.0
 
-# Убедимся, что goimports установлен
 $(GOIMPORTS):
 	@echo "Installing goimports..."
 	@go install golang.org/x/tools/cmd/goimports@latest
 
+$(GOSEC):
+	@echo "Installing gosec..."
+	@go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+
 # Lint: проверка стиля и ошибок
 lint: $(GOLANGCI_LINT)
 	@echo "Running golangci-lint..."
-	$(GOLANGCI_LINT) run --fix --config .golangci-lint.yaml ./...
+	$(GOLANGCI_LINT) run --config .golangci-lint.yaml ./...
+
+# Security scan
+security: $(GOSEC)
+	@echo "Running gosec security scanner..."
+	$(GOSEC) ./...
 
 # fmt: автоматическое форматирование
 fmt: $(GOIMPORTS)
@@ -29,11 +40,22 @@ fmt: $(GOIMPORTS)
 	@find . -name "*.go" -not -path "./vendor/*" -exec gofmt -s -w {} \;
 	@$(GOIMPORTS) -local github.com/shuldan/framework -w $$(find . -name "*.go" -not -path "./vendor/*")
 
-# fmt-check: проверить, нет ли неотформатированных файлов (для CI)
+# fmt-check: проверить форматирование (для CI)
 fmt-check: $(GOIMPORTS)
 	@echo "Checking code formatting..."
-	@gofmt -s -l . | grep -v vendor | grep .go && echo "❌ Unformatted files found" && exit 1 || echo "✅ All files are formatted"
-	@$(GOIMPORTS) -local github.com/shuldan/framework -l . | grep -v vendor && echo "❌ Unformatted imports" && exit 1 || echo "✅ Imports are clean"
+	@unformatted=$$(gofmt -s -l . | grep -v vendor | grep .go || true); \
+	if [ -n "$$unformatted" ]; then \
+		echo "❌ Unformatted files found:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+	@unformatted_imports=$$($(GOIMPORTS) -local github.com/shuldan/framework -l . | grep -v vendor || true); \
+	if [ -n "$$unformatted_imports" ]; then \
+		echo "❌ Unformatted imports:"; \
+		echo "$$unformatted_imports"; \
+		exit 1; \
+	fi
+	@echo "✅ All files are properly formatted"
 
 # vet: базовая проверка Go
 vet:
@@ -51,14 +73,47 @@ test-coverage:
 	@go test ./... -coverprofile=coverage.out -covermode=atomic
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
+	@go tool cover -func=coverage.out
 
-# all: полная проверка (для CI)
-all: fmt-check vet lint test
+# bench: бенчмарки
+bench:
+	@echo "Running benchmarks..."
+	@go test -bench=. -benchmem ./... -run=^$$
+
+# all: полная проверка (локально)
+all: fmt-check vet lint security test
 
 # ci: полная проверка для CI
 ci: fmt-check vet lint test-coverage
 	@echo "✅ All CI checks passed."
 
-# Убедимся, что после всех проверок нет изменённых файлов (например, gofmt)
-verify-no-changes:
-	@git diff --exit-code || (echo "❌ Code changes detected after checks. Run 'make fmt' and commit again."; exit 1)
+# clean: очистка
+clean:
+	@echo "Cleaning..."
+	@go clean -testcache
+	@rm -f coverage.out coverage.html
+
+# deps: обновление зависимостей
+deps:
+	@echo "Downloading dependencies..."
+	@go mod download
+	@go mod verify
+	@go mod tidy
+
+# help: показать помощь
+help:
+	@echo "Available targets:"
+	@echo "  install-tools  - Install required tools"
+	@echo "  fmt           - Format code"
+	@echo "  fmt-check     - Check code formatting"
+	@echo "  lint          - Run linter"
+	@echo "  security      - Run security scanner"
+	@echo "  vet           - Run go vet"
+	@echo "  test          - Run tests"
+	@echo "  test-coverage - Run tests with coverage"
+	@echo "  bench         - Run benchmarks"
+	@echo "  all           - Run all checks (local)"
+	@echo "  ci            - Run CI checks"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  deps          - Download and verify dependencies"
+	@echo "  help          - Show this help"
