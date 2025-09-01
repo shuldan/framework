@@ -12,6 +12,12 @@ type registry struct {
 	mu      sync.RWMutex
 }
 
+func NewRegistry() contracts.AppRegistry {
+	return &registry{
+		modules: make([]contracts.AppModule, 0),
+	}
+}
+
 func (r *registry) Register(module contracts.AppModule) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

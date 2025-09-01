@@ -122,7 +122,7 @@ func BenchmarkStrategyRepository(b *testing.B) {
 	benchmarkStrategies(b, sqlDB, mapper, ctx, setupUsers)
 }
 
-func setupStrategyBenchmarkUsers(ctx context.Context) []TestUser {
+func setupStrategyBenchmarkUsers(_ context.Context) []TestUser {
 	setupUsers := make([]TestUser, 100)
 	for i := 0; i < 100; i++ {
 		user := NewTestUser(int64(i+1), fmt.Sprintf("User %d", i), fmt.Sprintf("user%d@example.com", i))

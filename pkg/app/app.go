@@ -22,6 +22,29 @@ type app struct {
 	shutdownTimeout time.Duration
 }
 
+func New(info AppInfo, container contracts.DIContainer, registry contracts.AppRegistry, opts ...func(*app)) contracts.App {
+	if container == nil {
+		container = NewContainer()
+	}
+
+	if registry == nil {
+		registry = NewRegistry()
+	}
+
+	a := &app{
+		container:       container,
+		registry:        registry,
+		info:            info,
+		shutdownTimeout: 10 * time.Second,
+	}
+
+	for _, opt := range opts {
+		opt(a)
+	}
+
+	return a
+}
+
 func WithGracefulTimeout(timeout time.Duration) func(*app) {
 	return func(a *app) {
 		a.shutdownTimeout = timeout

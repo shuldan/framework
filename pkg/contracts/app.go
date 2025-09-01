@@ -11,6 +11,7 @@ const (
 	LoggerModuleName   = "logger"
 	ConfigModuleName   = "config"
 	DatabaseModuleName = "database"
+	HTTPModuleName     = "http"
 )
 
 type DIContainer interface {
