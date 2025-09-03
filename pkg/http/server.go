@@ -20,7 +20,17 @@ type Server struct {
 	mu      sync.RWMutex
 }
 
-func NewServer(addr string, router contracts.HTTPRouter, logger contracts.Logger) *Server {
+func NewServer(addr string, router contracts.HTTPRouter, logger contracts.Logger) contracts.HTTPServer {
+	if router == nil {
+		panic("router cannot be nil")
+	}
+	if logger == nil {
+		panic("logger cannot be nil")
+	}
+	if addr == "" {
+		addr = ":8080"
+	}
+
 	return &Server{
 		addr:   addr,
 		router: router,

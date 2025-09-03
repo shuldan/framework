@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -22,16 +23,27 @@ type httpContext struct {
 	bodyRead     bool
 	startTime    time.Time
 	requestID    string
+	mu           sync.RWMutex
 }
 
 func NewHTTPContext(w http.ResponseWriter, r *http.Request, logger contracts.Logger) contracts.HTTPContext {
+	var requestID string
+	if clientReqID := r.Header.Get("X-Request-ID"); clientReqID != "" {
+		requestID = clientReqID
+	} else {
+		requestID = generateRequestID()
+	}
+
+	ctx := context.WithValue(r.Context(), RequestID, requestID)
+	r = r.WithContext(ctx)
+
 	return &httpContext{
 		req:       r,
 		resp:      w,
 		logger:    logger,
 		params:    make(map[string]interface{}),
 		startTime: time.Now(),
-		requestID: generateRequestID(),
+		requestID: requestID,
 	}
 }
 
@@ -40,14 +52,24 @@ func (c *httpContext) Context() context.Context {
 }
 
 func (c *httpContext) SetContext(ctx context.Context) {
+	if oldReqID := c.req.Context().Value(RequestID); oldReqID != nil {
+		ctx = context.WithValue(ctx, RequestID, oldReqID)
+	}
+	if oldHTTPCtx := c.req.Context().Value(ContextKey); oldHTTPCtx != nil {
+		ctx = context.WithValue(ctx, ContextKey, oldHTTPCtx)
+	}
 	c.req = c.req.WithContext(ctx)
 }
 
 func (c *httpContext) Set(key string, value interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.params[key] = value
 }
 
 func (c *httpContext) Get(key string) (interface{}, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	value, exists := c.params[key]
 	return value, exists
 }
@@ -121,11 +143,16 @@ func (c *httpContext) SetHeader(key, value string) contracts.HTTPResponseWriter 
 }
 
 func (c *httpContext) Status(code int) contracts.HTTPResponseWriter {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.statusCode = code
 	return c
 }
 
 func (c *httpContext) JSON(v interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.responseSent {
 		return ErrResponseAlreadySent
 	}
@@ -135,7 +162,7 @@ func (c *httpContext) JSON(v interface{}) error {
 		return ErrJSONMarshal.WithCause(err)
 	}
 
-	c.SetHeader("Content-Type", "application/json")
+	c.resp.Header().Set("Content-Type", "application/json")
 
 	if c.statusCode == 0 {
 		c.statusCode = http.StatusOK
@@ -208,6 +235,8 @@ func (c *httpContext) NoContent() error {
 }
 
 func (c *httpContext) StatusCode() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.statusCode
 }
 

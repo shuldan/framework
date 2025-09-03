@@ -3,16 +3,59 @@ package http
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
+type ClientConfig struct {
+	Timeout        time.Duration
+	MaxRetries     int
+	RetryWaitMin   time.Duration
+	RetryWaitMax   time.Duration
+	RetryCondition func(*http.Response, error) bool
+}
+
+func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
+	if config.Timeout == 0 {
+		config.Timeout = 30 * time.Second
+	}
+	if config.MaxRetries == 0 {
+		config.MaxRetries = 3
+	}
+	if config.RetryWaitMin == 0 {
+		config.RetryWaitMin = time.Second
+	}
+	if config.RetryWaitMax == 0 {
+		config.RetryWaitMax = 10 * time.Second
+	}
+	if config.RetryCondition == nil {
+		config.RetryCondition = func(resp *http.Response, err error) bool {
+			if err != nil {
+				return true
+			}
+			return resp.StatusCode >= 500 || resp.StatusCode == 429
+		}
+	}
+
+	return &Client{
+		client: &http.Client{
+			Timeout: config.Timeout,
+		},
+		logger: logger,
+		config: config,
+	}
+}
+
 type Client struct {
 	client *http.Client
 	logger contracts.Logger
+	config ClientConfig
 }
 
 func NewClient(logger contracts.Logger) *Client {
@@ -65,39 +108,129 @@ func (c *Client) Patch(ctx context.Context, url string, body interface{}, opts .
 }
 
 func (c *Client) Do(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), bytes.NewReader(req.Body()))
+	if c.config.MaxRetries == 0 {
+		return c.doSingleRequest(ctx, req)
+	}
+	return c.doWithRetry(ctx, req)
+}
+
+func (c *Client) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+		if attempt > 0 {
+			if err := c.waitForRetry(ctx, attempt, req.URL()); err != nil {
+				return nil, err
+			}
+		}
+		resp, err := c.doSingleRequest(ctx, req)
+		if err != nil {
+			lastErr = err
+			if !c.config.RetryCondition(nil, err) {
+				break
+			}
+			continue
+		}
+		return resp, nil
+	}
+	return nil, c.wrapRetryError(lastErr)
+}
+
+func (c *Client) doSingleRequest(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+	httpReq, err := c.buildHTTPRequest(ctx, req)
 	if err != nil {
 		return nil, ErrHTTPRequest.WithCause(err)
 	}
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, ErrHTTPRequest.WithCause(err)
+	}
+	return c.processResponse(resp, req)
+}
 
+func (c *Client) buildHTTPRequest(ctx context.Context, req contracts.HTTPRequest) (*http.Request, error) {
+	body := req.Body()
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
 	for key, values := range req.Headers() {
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
 		}
 	}
+	return httpReq, nil
+}
 
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, ErrHTTPRequest.WithCause(err)
+func (c *Client) processResponse(resp *http.Response, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && c.logger != nil {
+			c.logger.Error("Failed to close response body", "error", closeErr)
+		}
+	}()
+	if c.config.RetryCondition != nil && c.config.RetryCondition(resp, nil) {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		if err = resp.Body.Close(); err != nil && c.logger != nil {
-			c.logger.Error("Failed to close response body", "error", err)
-			return nil, ErrHTTPRequest.WithCause(err)
-		}
 		return nil, ErrHTTPRequest.WithCause(err)
 	}
-	if err = resp.Body.Close(); err != nil && c.logger != nil {
-		c.logger.Error("Failed to close response body", "error", err)
-		return nil, ErrHTTPRequest.WithCause(err)
-	}
-
 	return &HTTPResponseImpl{
 		statusCode: resp.StatusCode,
 		headers:    resp.Header,
 		body:       body,
 		request:    req,
 	}, nil
+}
+
+func (c *Client) waitForRetry(ctx context.Context, attempt int, url string) error {
+	waitTime := c.calculateRetryWait(attempt)
+	c.logger.Debug("Retrying HTTP request",
+		"attempt", attempt,
+		"wait_time", waitTime,
+		"url", url)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(waitTime):
+		return nil
+	}
+}
+
+func (c *Client) calculateRetryWait(attempt int) time.Duration {
+	waitTime := time.Duration(float64(c.config.RetryWaitMin) * math.Pow(2, float64(attempt-1)))
+	if waitTime > c.config.RetryWaitMax {
+		waitTime = c.config.RetryWaitMax
+	}
+	jitter := c.generateSecureJitter(waitTime)
+	return waitTime + jitter - time.Duration(float64(waitTime)*0.25)
+}
+
+func (c *Client) generateSecureJitter(waitTime time.Duration) time.Duration {
+	maxJitter := float64(waitTime) * 0.5
+	maxJitterInt := int64(maxJitter)
+	if maxJitterInt <= 0 {
+		return 0
+	}
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		if c.logger != nil {
+			c.logger.Warn("Failed to generate secure random jitter, using time-based fallback", "error", err)
+		}
+		return time.Duration(time.Now().UnixNano() % maxJitterInt)
+	}
+	randomInt64 := int64(0)
+	for i, b := range randomBytes {
+		randomInt64 |= int64(b) << (i * 8)
+	}
+	if randomInt64 < 0 {
+		randomInt64 = -randomInt64
+	}
+	return time.Duration(randomInt64 % maxJitterInt)
+}
+
+func (c *Client) wrapRetryError(lastErr error) error {
+	if lastErr != nil {
+		return ErrHTTPRequest.WithCause(lastErr)
+	}
+	return ErrHTTPRequest.WithDetail("reason", "max retries exceeded")
 }

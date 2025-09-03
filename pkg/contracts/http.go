@@ -156,10 +156,10 @@ type HTTPWebsocketContext interface {
 	IsWebsocket() bool
 	Origin() string
 	Subprotocols() []string
-	Upgrade() (HTTPWebsocketConn, error)
+	Upgrade() (HTTPWebsocketConnection, error)
 }
 
-type HTTPWebsocketConn interface {
+type HTTPWebsocketConnection interface {
 	Read() <-chan HTTPWebsocketMessage
 	Write(ctx context.Context, msg HTTPWebsocketMessage) error
 	Close() error

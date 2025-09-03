@@ -2,10 +2,12 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
@@ -34,25 +36,31 @@ func (f *FileUpload) Parse(maxMemory int64) error {
 }
 
 func (f *FileUpload) FormFile(name string) (contracts.HTTPFile, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, ErrFileNotFound.WithDetail("name", name).WithDetail("reason", "empty name")
+	}
+
 	if !f.parsed {
-		return nil, ErrMustCallParse
+		if err := f.Parse(32 << 20); err != nil {
+			return nil, err
+		}
 	}
 
 	if f.form == nil || f.form.File == nil {
-		return nil, ErrFileNotFound.WithDetail("name", name)
+		return nil, ErrFileNotFound.WithDetail("name", name).WithDetail("reason", "no files in form")
 	}
 
 	files, exists := f.form.File[name]
 	if !exists || len(files) == 0 {
-		return nil, ErrFileNotFound.WithDetail("name", name)
+		return nil, ErrFileNotFound.WithDetail("name", name).WithDetail("reason", "file not found in form")
 	}
 
-	return &HTTPFileImpl{header: files[0], logger: f.logger}, nil
+	return &httpFileImpl{header: files[0], logger: f.logger}, nil
 }
 
 func (f *FileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
 	if !f.parsed {
-		if err := f.Parse(32 << 20); err != nil { // 32 MB default
+		if err := f.Parse(32 << 20); err != nil {
 			return nil, err
 		}
 	}
@@ -68,7 +76,7 @@ func (f *FileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
 
 	files := make([]contracts.HTTPFile, len(headers))
 	for i, header := range headers {
-		files[i] = &HTTPFileImpl{header: header, logger: f.logger}
+		files[i] = &httpFileImpl{header: header, logger: f.logger}
 	}
 
 	return files, nil
@@ -76,88 +84,91 @@ func (f *FileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
 
 func (f *FileUpload) FormValue(name string) string {
 	if !f.parsed {
-		if err := f.Parse(32 << 20); err != nil { // 32 MB default
+		if err := f.Parse(32 << 20); err != nil {
 			return ""
 		}
 	}
-
 	if f.form == nil || f.form.Value == nil {
 		return ""
 	}
-
 	values, exists := f.form.Value[name]
 	if !exists || len(values) == 0 {
 		return ""
 	}
-
 	return values[0]
 }
 
 func (f *FileUpload) FormValues(name string) []string {
 	if !f.parsed {
-		if err := f.Parse(32 << 20); err != nil { // 32 MB default
+		if err := f.Parse(32 << 20); err != nil {
 			return []string{}
 		}
 	}
-
 	if f.form == nil || f.form.Value == nil {
 		return []string{}
 	}
-
 	values, exists := f.form.Value[name]
 	if !exists {
 		return []string{}
 	}
-
 	return values
 }
 
-type HTTPFileImpl struct {
+type httpFileImpl struct {
 	header *multipart.FileHeader
 	logger contracts.Logger
 }
 
-func (f *HTTPFileImpl) Header() map[string][]string {
+func (f *httpFileImpl) Header() map[string][]string {
 	return map[string][]string(f.header.Header)
 }
 
-func (f *HTTPFileImpl) Filename() string {
+func (f *httpFileImpl) Filename() string {
 	return f.header.Filename
 }
 
-func (f *HTTPFileImpl) Size() int64 {
+func (f *httpFileImpl) Size() int64 {
 	return f.header.Size
 }
 
-func (f *HTTPFileImpl) Open() (io.ReadCloser, error) {
+func (f *httpFileImpl) Open() (io.ReadCloser, error) {
 	return f.header.Open()
 }
 
-func (f *HTTPFileImpl) Save(path string) error {
-	if !isPathSafe("", path) {
-		return errors.New("invalid file path")
+func (f *httpFileImpl) Save(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("path cannot be empty")
 	}
-
+	if !isPathSafe("", path) {
+		return errors.New("unsafe file path")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
 	file, err := f.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open uploaded file: %w", err)
 	}
-	defer func(file io.ReadCloser) {
-		if err := file.Close(); err != nil && f.logger != nil {
-			f.logger.Error("Failed to close uploaded file", "error", err)
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && f.logger != nil {
+			f.logger.Error("Failed to close uploaded file", "error", closeErr)
 		}
-	}(file)
-
-	dst, err := os.Create(filepath.Clean(path))
+	}()
+	cleanPath := filepath.Clean(path)
+	dst, err := os.OpenFile(cleanPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer func(dst *os.File) {
-		if err := dst.Close(); err != nil && f.logger != nil {
-			f.logger.Error("Failed to close destination file", "error", err)
+	defer func() {
+		if closeErr := dst.Close(); closeErr != nil && f.logger != nil {
+			f.logger.Error("Failed to close destination file", "error", closeErr)
 		}
-	}(dst)
-
-	_, err = io.Copy(dst, file)
-	return err
+	}()
+	const maxFileSize = 100 << 20
+	_, err = io.CopyN(dst, file, maxFileSize)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("failed to copy file data: %w", err)
+	}
+	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
@@ -36,7 +37,6 @@ func (w *WebsocketContext) Subprotocols() []string {
 	if protocols == "" {
 		return []string{}
 	}
-
 	parts := strings.Split(protocols, ",")
 	result := make([]string, len(parts))
 	for i, part := range parts {
@@ -46,52 +46,88 @@ func (w *WebsocketContext) Subprotocols() []string {
 	return result
 }
 
-func (w *WebsocketContext) Upgrade() (contracts.HTTPWebsocketConn, error) {
+func (w *WebsocketContext) Upgrade() (contracts.HTTPWebsocketConnection, error) {
 	if !w.IsWebsocket() {
 		return nil, ErrWebsocketUpgrade.WithDetail("reason", "not a websocket request")
 	}
-
 	key := w.ctx.RequestHeader("Sec-WebSocket-Key")
 	if key == "" {
 		return nil, ErrWebsocketUpgrade.WithDetail("reason", "missing Sec-WebSocket-Key")
 	}
-
+	version := w.ctx.RequestHeader("Sec-WebSocket-Version")
+	if version != "13" {
+		return nil, ErrWebsocketUpgrade.WithDetail("reason", "unsupported WebSocket version").WithDetail("version", version)
+	}
+	origin := w.Origin()
+	if origin != "" && !w.isOriginAllowed(origin) {
+		return nil, ErrWebsocketUpgrade.WithDetail("reason", "origin not allowed").WithDetail("origin", origin)
+	}
 	h := sha1.New() // #nosec G401
 	h.Write([]byte(key + websocketMagicString))
 	accept := base64.StdEncoding.EncodeToString(h.Sum(nil))
-
 	hijacker, ok := w.ctx.resp.(http.Hijacker)
 	if !ok {
 		return nil, ErrWebsocketUpgrade.WithDetail("reason", "response writer doesn't support hijacking")
 	}
-
+	selectedProtocol := w.selectSubprotocol()
 	w.ctx.resp.Header().Set("Upgrade", "websocket")
 	w.ctx.resp.Header().Set("Connection", "Upgrade")
 	w.ctx.resp.Header().Set("Sec-WebSocket-Accept", accept)
+	if selectedProtocol != "" {
+		w.ctx.resp.Header().Set("Sec-WebSocket-Protocol", selectedProtocol)
+	}
 	w.ctx.resp.WriteHeader(http.StatusSwitchingProtocols)
-
 	conn, bufrw, err := hijacker.Hijack()
 	if err != nil {
 		return nil, ErrWebsocketUpgrade.WithCause(err)
 	}
-
-	return NewWebsocketConn(conn, bufrw, w.logger), nil
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if err := tcpConn.SetKeepAlive(true); err != nil && w.logger != nil {
+			w.logger.Warn("Failed to set keep alive", "error", err)
+		}
+		if err := tcpConn.SetKeepAlivePeriod(30 * time.Second); err != nil && w.logger != nil {
+			w.logger.Warn("Failed to set keep alive period", "error", err)
+		}
+	}
+	return NewWebsocketConnection(conn, bufrw, w.logger), nil
 }
 
-type WebsocketConn struct {
+func (w *WebsocketContext) isOriginAllowed(origin string) bool {
+	return true
+}
+
+func (w *WebsocketContext) selectSubprotocol() string {
+	clientProtocols := w.Subprotocols()
+	if len(clientProtocols) == 0 {
+		return ""
+	}
+	supportedProtocols := []string{"chat", "echo"}
+	for _, clientProto := range clientProtocols {
+		for _, supportedProto := range supportedProtocols {
+			if clientProto == supportedProto {
+				return clientProto
+			}
+		}
+	}
+	return ""
+}
+
+type WebsocketConnection struct {
 	conn   net.Conn
 	reader *bufio.Reader
 	writer *bufio.Writer
-	mu     sync.Mutex
+	mu     sync.RWMutex
+
 	closed bool
 
 	readChan chan contracts.HTTPWebsocketMessage
 	done     chan struct{}
 	logger   contracts.Logger
+	wg       sync.WaitGroup
 }
 
-func NewWebsocketConn(conn net.Conn, bufrw *bufio.ReadWriter, logger contracts.Logger) *WebsocketConn {
-	ws := &WebsocketConn{
+func NewWebsocketConnection(conn net.Conn, bufrw *bufio.ReadWriter, logger contracts.Logger) contracts.HTTPWebsocketConnection {
+	ws := &WebsocketConnection{
 		conn:     conn,
 		reader:   bufrw.Reader,
 		writer:   bufrw.Writer,
@@ -100,16 +136,17 @@ func NewWebsocketConn(conn net.Conn, bufrw *bufio.ReadWriter, logger contracts.L
 		logger:   logger,
 	}
 
+	ws.wg.Add(1)
 	go ws.readLoop()
 
 	return ws
 }
 
-func (w *WebsocketConn) Read() <-chan contracts.HTTPWebsocketMessage {
+func (w *WebsocketConnection) Read() <-chan contracts.HTTPWebsocketMessage {
 	return w.readChan
 }
 
-func (w *WebsocketConn) Write(_ context.Context, msg contracts.HTTPWebsocketMessage) error {
+func (w *WebsocketConnection) Write(_ context.Context, msg contracts.HTTPWebsocketMessage) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -163,22 +200,23 @@ func (w *WebsocketConn) Write(_ context.Context, msg contracts.HTTPWebsocketMess
 	return w.writer.Flush()
 }
 
-func (w *WebsocketConn) Close() error {
+func (w *WebsocketConnection) Close() error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	if w.closed {
+		w.mu.Unlock()
 		return nil
 	}
-
 	w.closed = true
 	close(w.done)
-	close(w.readChan)
+	w.mu.Unlock()
 
+	w.wg.Wait()
+
+	close(w.readChan)
 	return w.conn.Close()
 }
 
-func (w *WebsocketConn) Ping(_ context.Context) error {
+func (w *WebsocketConnection) Ping(_ context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -195,20 +233,18 @@ func (w *WebsocketConn) Ping(_ context.Context) error {
 	return w.writer.Flush()
 }
 
-func (w *WebsocketConn) IsClosed() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (w *WebsocketConnection) IsClosed() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	return w.closed
 }
 
-func (w *WebsocketConn) readLoop() {
+func (w *WebsocketConnection) readLoop() {
+	defer w.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
 			if w.logger != nil {
 				w.logger.Error("websocket read panic", "panic", r)
-			}
-			if err := w.Close(); err != nil && w.logger != nil {
-				w.logger.Error("error closing websocket connection", "error", err)
 			}
 			w.readChan <- contracts.HTTPWebsocketMessage{
 				Error: fmt.Errorf("websocket panic: %v", r),
@@ -223,20 +259,29 @@ func (w *WebsocketConn) readLoop() {
 		default:
 		}
 
-		frame, err := w.readFrame()
-		if err != nil {
+		if err := w.conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
 			w.readChan <- contracts.HTTPWebsocketMessage{Error: err}
 			return
 		}
 
+		frame, err := w.readFrame()
+		if err != nil {
+			if !w.IsClosed() {
+				w.readChan <- contracts.HTTPWebsocketMessage{Error: err}
+			}
+			return
+		}
+
 		if err := w.handleFrame(frame); err != nil {
-			w.readChan <- contracts.HTTPWebsocketMessage{Error: err}
+			if !w.IsClosed() {
+				w.readChan <- contracts.HTTPWebsocketMessage{Error: err}
+			}
 			return
 		}
 	}
 }
 
-func (w *WebsocketConn) sendPong(data []byte) {
+func (w *WebsocketConnection) sendPong(data []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -263,7 +308,7 @@ type websocketFrame struct {
 	payload []byte
 }
 
-func (w *WebsocketConn) readFrame() (*websocketFrame, error) {
+func (w *WebsocketConnection) readFrame() (*websocketFrame, error) {
 	header, err := w.readHeader()
 	if err != nil {
 		return nil, err
@@ -298,13 +343,13 @@ func (w *WebsocketConn) readFrame() (*websocketFrame, error) {
 	}, nil
 }
 
-func (w *WebsocketConn) readHeader() ([]byte, error) {
+func (w *WebsocketConnection) readHeader() ([]byte, error) {
 	header := make([]byte, 2)
 	_, err := io.ReadFull(w.reader, header)
 	return header, err
 }
 
-func (w *WebsocketConn) readPayloadLength(header []byte) (int, error) {
+func (w *WebsocketConnection) readPayloadLength(header []byte) (int, error) {
 	payloadLen := int(header[1] & 0x7F)
 
 	switch payloadLen {
@@ -333,13 +378,13 @@ func (w *WebsocketConn) readPayloadLength(header []byte) (int, error) {
 	}
 }
 
-func (w *WebsocketConn) readMaskKey() ([]byte, error) {
+func (w *WebsocketConnection) readMaskKey() ([]byte, error) {
 	maskKey := make([]byte, 4)
 	_, err := io.ReadFull(w.reader, maskKey)
 	return maskKey, err
 }
 
-func (w *WebsocketConn) readAndUnmaskPayload(payloadLen int, maskKey []byte) ([]byte, error) {
+func (w *WebsocketConnection) readAndUnmaskPayload(payloadLen int, maskKey []byte) ([]byte, error) {
 	if payloadLen == 0 {
 		return []byte{}, nil
 	}
@@ -358,7 +403,7 @@ func (w *WebsocketConn) readAndUnmaskPayload(payloadLen int, maskKey []byte) ([]
 	return payload, nil
 }
 
-func (w *WebsocketConn) handleFrame(frame *websocketFrame) error {
+func (w *WebsocketConnection) handleFrame(frame *websocketFrame) error {
 	switch frame.opcode {
 	case 0x01:
 		if frame.fin {

@@ -5,11 +5,17 @@ import (
 )
 
 func Is(err, target error) bool {
+	if err == nil && target == nil {
+		return false
+	}
 	return errors.Is(err, target)
 }
 
-func As(err error, target interface{}) bool {
-	return errors.As(err, &target)
+func As[T error](err error, target *T) bool {
+	if err == nil {
+		return false
+	}
+	return errors.As(err, target)
 }
 
 func Unwrap(err error) error {
