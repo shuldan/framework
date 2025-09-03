@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -18,7 +17,7 @@ type ClientConfig struct {
 	MaxRetries     int
 	RetryWaitMin   time.Duration
 	RetryWaitMax   time.Duration
-	RetryCondition func(*http.Response, error) bool
+	RetryCondition func(contracts.HTTPResponse, error) bool
 }
 
 func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
@@ -35,11 +34,11 @@ func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
 		config.RetryWaitMax = 10 * time.Second
 	}
 	if config.RetryCondition == nil {
-		config.RetryCondition = func(resp *http.Response, err error) bool {
+		config.RetryCondition = func(resp contracts.HTTPResponse, err error) bool {
 			if err != nil {
 				return true
 			}
-			return resp.StatusCode >= 500 || resp.StatusCode == 429
+			return resp.StatusCode() >= 500 || resp.StatusCode() == 429
 		}
 	}
 
@@ -123,12 +122,12 @@ func (c *Client) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (co
 			}
 		}
 		resp, err := c.doSingleRequest(ctx, req)
-		if err != nil {
+		if err != nil || resp != nil && !resp.IsSuccess() {
 			lastErr = err
-			if !c.config.RetryCondition(nil, err) {
-				break
+			if c.config.RetryCondition != nil && c.config.RetryCondition(resp, lastErr) {
+				continue
 			}
-			continue
+			break
 		}
 		return resp, nil
 	}
@@ -167,14 +166,11 @@ func (c *Client) processResponse(resp *http.Response, req contracts.HTTPRequest)
 			c.logger.Error("Failed to close response body", "error", closeErr)
 		}
 	}()
-	if c.config.RetryCondition != nil && c.config.RetryCondition(resp, nil) {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
-	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, ErrHTTPRequest.WithCause(err)
 	}
-	return &HTTPResponseImpl{
+	return &httpResponse{
 		statusCode: resp.StatusCode,
 		headers:    resp.Header,
 		body:       body,
@@ -202,7 +198,11 @@ func (c *Client) calculateRetryWait(attempt int) time.Duration {
 		waitTime = c.config.RetryWaitMax
 	}
 	jitter := c.generateSecureJitter(waitTime)
-	return waitTime + jitter - time.Duration(float64(waitTime)*0.25)
+	calculated := waitTime + jitter - time.Duration(float64(waitTime)*0.25)
+	if calculated < c.config.RetryWaitMin {
+		return c.config.RetryWaitMin
+	}
+	return calculated
 }
 
 func (c *Client) generateSecureJitter(waitTime time.Duration) time.Duration {

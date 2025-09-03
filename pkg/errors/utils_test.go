@@ -160,3 +160,125 @@ func TestUtils_NilHandling(t *testing.T) {
 		t.Error("Join with no arguments should return nil")
 	}
 }
+
+func TestIs_NilComparisons(t *testing.T) {
+	err := errors.New("test error")
+
+	if Is(nil, err) {
+		t.Error("nil should not match non-nil error")
+	}
+
+	if Is(err, nil) {
+		t.Error("non-nil error should not match nil")
+	}
+
+	if Is(nil, nil) {
+		t.Error("both nil should return false according to implementation")
+	}
+}
+
+type customError struct {
+	inner error
+}
+
+func (c customError) Error() string {
+	return "custom: " + c.inner.Error()
+}
+
+func (c customError) Is(target error) bool {
+	return errors.Is(c.inner, target)
+}
+
+func TestJoin_SingleError(t *testing.T) {
+	err := errors.New("single error")
+
+	joined := Join(err)
+	if !errors.Is(joined, err) {
+		t.Error("joining single error should return the same error")
+	}
+}
+
+func TestJoin_ErrorOrdering(t *testing.T) {
+	err1 := errors.New("first")
+	err2 := errors.New("second")
+	err3 := errors.New("third")
+
+	var joinedStr string
+	joined := Join(err1, err2, err3)
+	if joined != nil {
+		joinedStr = joined.Error()
+	}
+	pos1 := strings.Index(joinedStr, "first")
+	pos2 := strings.Index(joinedStr, "second")
+	pos3 := strings.Index(joinedStr, "third")
+
+	if pos1 > pos2 || pos2 > pos3 {
+		t.Error("errors should appear in the same order as they were joined")
+	}
+}
+
+func TestIs_WithCustomError(t *testing.T) {
+	innerErr := errors.New("inner")
+	customErr := customError{inner: innerErr}
+
+	if !Is(customErr, innerErr) {
+		t.Error("should find inner error through custom Is method")
+	}
+}
+
+func TestUnwrap_MultipleLevel(t *testing.T) {
+	level0 := errors.New("level 0")
+	level1 := ErrInternal.WithCause(level0)
+	level2 := ErrBusiness.WithCause(level1)
+	level3 := ErrValidation.WithCause(level2)
+
+	unwrapped1 := Unwrap(level3)
+	if !errors.Is(unwrapped1, level2) {
+		t.Error("first unwrap should return level2")
+	}
+
+	unwrapped2 := Unwrap(unwrapped1)
+	if !errors.Is(unwrapped2, level1) {
+		t.Error("second unwrap should return level1")
+	}
+
+	unwrapped3 := Unwrap(unwrapped2)
+	if !errors.Is(unwrapped3, level0) {
+		t.Error("third unwrap should return level0")
+	}
+
+	unwrapped4 := Unwrap(unwrapped3)
+	if unwrapped4 != nil {
+		t.Error("final unwrap should return nil")
+	}
+}
+
+func TestJoin_WithFrameworkErrors(t *testing.T) {
+	err1 := ErrValidation.WithDetail("field", "username")
+	err2 := ErrPermission.WithDetail("resource", "user")
+	genericErr := errors.New("generic error")
+
+	joined := Join(err1, err2, genericErr)
+
+	if !Is(joined, err1) {
+		t.Error("should find validation error in joined error")
+	}
+	if !Is(joined, err2) {
+		t.Error("should find permission error in joined error")
+	}
+	if !Is(joined, genericErr) {
+		t.Error("should find generic error in joined error")
+	}
+}
+
+func TestAs_WithJoinedErrors(t *testing.T) {
+	validationErr := ErrValidation.WithDetail("field", "email")
+	businessErr := ErrBusiness.WithDetail("rule", "unique_email")
+
+	joined := Join(validationErr, businessErr)
+
+	var target *Error
+	if !As(joined, &target) {
+		t.Error("should be able to extract Error from joined errors")
+	}
+}

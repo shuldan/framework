@@ -3,550 +3,406 @@
 [![Go CI](https://github.com/shuldan/framework/workflows/Go%20CI/badge.svg)](https://github.com/shuldan/framework/actions)
 [![codecov](https://codecov.io/gh/shuldan/framework/branch/main/graph/badge.svg)](https://codecov.io/gh/shuldan/framework)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shuldan/framework)](https://goreportcard.com/report/github.com/shuldan/framework)
-[![GoDoc](https://godoc.org/github.com/shuldan/framework?status.svg)](https://godoc.org/github.com/shuldan/framework)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-> **Shuldan** — современный, легковесный и модульный фреймворк на Go для создания расширяемых приложений с поддержкой внедрения зависимостей (DI), жизненного цикла модулей, типобезопасных репозиториев, очередей, событий и логирования.
+**Shuldan Framework** — модульный, расширяемый Go-фреймворк для создания высоконагруженных серверных приложений.  
+Он предоставляет готовые компоненты для HTTP, CLI, очередей, DI, логирования, событий и управления жизненным циклом.
+
+---
+
+## 🚀 Быстрый старт
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/shuldan/framework/pkg/app"
+    "github.com/shuldan/framework/pkg/logger"
+)
+
+func main() {
+    application := app.New(
+        app.AppInfo{
+            AppName:     "MyApp",
+            Version:     "1.0.0",
+            Environment: "development",
+        },
+        nil,
+        nil,
+        app.WithGracefulTimeout(10*time.Second),
+    )
+
+    if err := application.Register(logger.NewModule()); err != nil {
+        log.Fatal(err)
+    }
+
+    if err := application.Run(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
 
 ---
 
 ## 🧱 Архитектура
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                            App                                  │
-│  ┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐ │
-│  │   Registry      │    │  Container   │    │   Context       │ │
-│  │ (модули)        │    │ (DI)         │    │ (жизненный цикл)│ │
-│  └─────────────────┘    └──────────────┘    └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-            │                      │                      │
-    ┌───────▼──────┐      ┌────────▼────────┐    ┌────────▼────────┐
-    │ CLI Module   │      │ Logger Module   │    │ Config Module   │
-    │ - Commands   │      │ - Structured    │    │ - Multi-source  │
-    │ - Help       │      │ - Levels        │    │ - Type-safe     │
-    │ - Validation │      │ - Colors        │    │ - Hierarchical  │
-    └──────────────┘      └─────────────────┘    └─────────────────┘
-            │                      │                      │
-    ┌───────▼──────┐      ┌────────▼────────┐    ┌────────▼────────┐
-    │Events Module │      │ Queue Module    │    │Database Module  │
-    │ - Pub/Sub    │      │ - Job queues    │    │ - Migrations    │
-    │ - Async      │      │ - Retry/DLQ     │    │ - Repositories  │
-    │ - Error safe │      │ - Metrics       │    │ - Query builder │
-    └──────────────┘      └─────────────────┘    └─────────────────┘
-```
+```mermaid
+graph TD
+    subgraph "Shuldan Framework Core"
+        A[App] --> B[Registry]
+        A --> C[Container DI]
+        A --> D[AppContext]
+    end
 
-Shuldan построен на модульной архитектуре, где каждый компонент — это **модуль**, реализующий интерфейс `AppModule`. Это позволяет легко подключать, настраивать и расширять функциональность приложения.
+    subgraph "Модули приложения"
+        B --> M1[CLI Module]
+        B --> M2[Logger Module]
+        B --> M3[Config Module]
+        B --> M4[HTTP Module]
+        B --> M5[Events Module]
+        B --> M6[Queue Module]
+        B --> M7[Database Module]
+    end
 
-```go
-type AppModule interface {
-    Name() string
-    Register(container DIContainer) error
-    Start(ctx AppContext) error
-    Stop(ctx AppContext) error
-}
+    subgraph "DI Container"
+        C --> F1[Factory]
+        C --> F2[Instance]
+        C --> F3[Resolve]
+        F1 -->|depends on| C
+        F2 -->|cached| C
+    end
+
+    subgraph "HTTP Module"
+        M4 --> H1[HTTP Server]
+        H1 --> H2[Router]
+        H1 --> H3[Middlewares]
+        H3 --> CORS[CORS]
+        H3 --> LoggerMiddleware[Logger]
+        H3 --> Recovery[Recovery]
+        H1 --> H4[Context]
+        H4 --> WebSockets[WebSockets]
+        H4 --> Streaming[Streaming]
+        H4 --> FileUpload[File Upload]
+    end
+
+    subgraph "Queue Module"
+        M6 --> Q1[Producer]
+        M6 --> Q2[Consumer]
+        Q2 --> Q3[Redis Broker]
+        Q2 --> Q4[Memory Broker]
+        Q1 -->|Publish| Q3
+        Q2 -->|Consume| Q3
+        Q2 -->|Process| Handler[Job Handler]
+    end
+
+    subgraph "Events Module"
+        M5 --> E1[Event Bus]
+        E1 --> E2[Subscribe]
+        E2 --> Listener[Listener Func]
+        E1 --> E3[Publish]
+        E3 --> E1
+    end
+
+    subgraph "Database Module"
+        M7 --> R1[Repository]
+        R1 --> R2[Transactional]
+        R1 --> R3[Find Save Delete]
+        M7 --> QBuilder[QueryBuilder]
+        M7 --> Migration[Migration Runner]
+        Migration --> SQL[SQL Dialect]
+    end
+
+    subgraph "Config Module"
+        M3 --> L1[Config Loader]
+        L1 --> JSON[JSON Loader]
+        L1 --> YAML[YAML Loader]
+        L1 --> ENV[Env Loader]
+        L1 --> CLI[CLI Flags Loader]
+        L1 --> Chain[ChainLoader]
+    end
+
+    subgraph "CLI Module"
+        M1 --> C1[Command Registry]
+        C1 --> CMD1[Command: serve]
+        C1 --> CMD2[Command: migrate]
+        C1 --> CMD3[Command: help]
+        CMD3 --> Help[Auto-generated Help]
+    end
+
+    subgraph "Logger Module"
+        M2 --> L[Logger]
+        L --> Text[Text Handler]
+        L --> JSON[JSON Handler]
+        L --> Color[Color Output]
+        L --> Context[With ...]
+    end
+
+    subgraph "Ошибки и утилиты"
+        Err[Errors] --> Code[Error Codes]
+        Err --> Detail[WithDetail ...]
+        Err --> Cause[WithCause ...]
+        Err --> Stack[Stack Trace]
+        D[Traits] --> UUID[UUID ID]
+        D --> IntID[Int64 ID]
+        D --> StringID[String ID]
+    end
+
+    A -->|управляет| M1
+    A -->|управляет| M2
+    A -->|управляет| M3
+    A -->|управляет| M4
+    A -->|управляет| M5
+    A -->|управляет| M6
+    A -->|управляет| M7
+
+    C -->|внедряет| M2
+    C -->|внедряет| M3
+    C -->|внедряет| M4
+    C -->|внедряет| M5
+    C -->|внедряет| M6
+    C -->|внедряет| M7
+
+    M3 -->|загружает| C
+    M3 -->|настраивает| M2
+    M3 -->|настраивает| M4
+    M3 -->|настраивает| M6
+
+    style A fill:#4C72B0,stroke:#333,color:white
+    style B fill:#55A868,stroke:#333,color:white
+    style C fill:#8C564B,stroke:#333,color:white
+    style D fill:#D62728,stroke:#333,color:white
+    classDef module fill:#1F77B4,stroke:#333,color:white;
+    class M1,M2,M3,M4,M5,M6,M7 module
 ```
 
 ---
 
 ## 🔧 Основные компоненты
 
----
-
 ### 1. **App — Ядро приложения**
 
-#### 📌 Назначение
-Центральный компонент, управляющий жизненным циклом приложения: регистрация модулей, запуск, остановка, graceful shutdown.
+Управляет жизненным циклом: регистрация модулей, запуск, остановка, graceful shutdown.
 
-#### 🧩 Реализация
+#### 📌 Ключевые возможности:
+- Регистрация модулей (`AppModule`)
+- Гибкий таймаут graceful shutdown
+- Интеграция с DI-контейнером
+- Поддержка `context.AppContext`
 
-- **Структура**: `app struct`
-    - `container`: DI-контейнер
-    - `registry`: реестр модулей
-    - `info`: метаинформация (имя, версия, окружение)
-    - `appCtx`: контекст приложения
-    - `shutdownTimeout`: таймаут для graceful shutdown
-
-- **Интерфейсы**:
-  ```go
-  type App interface {
-      Register(module AppModule) error
-      Run() error
-  }
-  ```
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
-application := app.New(
-    app.AppInfo{
-        AppName:     "MyApp",
-        Version:     "1.0.0",
-        Environment: "development",
-    },
-    nil, nil,
-    app.WithGracefulTimeout(10*time.Second),
-)
-
-if err := application.Register(logger.NewModule()); err != nil {
-    log.Fatal(err)
-}
-
-if err := application.Run(); err != nil {
-    log.Fatal(err)
-}
+application := app.New(app.AppInfo{...}, nil, nil, app.WithGracefulTimeout(10*time.Second))
+application.Register(logger.NewModule())
+application.Run()
 ```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrModuleRegistration` | Ошибка регистрации модуля | Проверьте, реализует ли модуль `AppModule` |
-| `context.DeadlineExceeded` | Превышен таймаут остановки | Увеличьте `WithGracefulTimeout` |
-
-#### 🛠️ Рекомендации
-- Всегда используйте `WithGracefulTimeout` для корректного завершения.
-- Запускайте `Run()` в `main()`, после регистрации всех модулей.
 
 ---
 
 ### 2. **DI Container — Внедрение зависимостей**
 
-#### 📌 Назначение
-Контейнер для управления зависимостями: регистрация фабрик, разрешение зависимостей, кэширование экземпляров.
+Контейнер для управления зависимостями: регистрация фабрик, разрешение, кэширование.
 
-#### 🧩 Реализация
+#### 📌 Возможности:
+- Поддержка `Factory`, `Instance`
+- Защита от циклических зависимостей
+- Lazy-инициализация
+- Проверка на дубликаты
 
-- **Структура**: `container`
-    - `factories`: `map[string]func(DIContainer) (interface{}, error)`
-    - `instances`: кэшированные экземпляры
-    - `resolving`: защита от циклических зависимостей
-
-- **Интерфейс**:
-  ```go
-  type DIContainer interface {
-      Has(name string) bool
-      Instance(name string, value interface{}) error
-      Factory(name string, factory func(DIContainer) (interface{}, error)) error
-      Get(name string) (interface{}, error)
-  }
-  ```
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
-container.Factory("logger", func(c DIContainer) (interface{}, error) {
-    return logger.NewLogger(), nil
+container := NewContainer()
+container.Instance("logger", myLogger)
+container.Factory("db", func(c DIContainer) (interface{}, error) {
+    return NewDatabase(c.Resolve("config")), nil
 })
-
-logInstance, err := container.Get("logger")
 ```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrCircularDep` | Циклическая зависимость | Пересмотрите архитектуру модулей |
-| `ErrValueNotFound` | Нет зарегистрированной фабрики | Проверьте имя и регистр |
-
-#### 🛠️ Рекомендации
-- Используйте осмысленные имена (`logger`, `db`, `event_bus`).
-- Избегайте регистрации экземпляров напрямую — используйте `Factory`.
 
 ---
 
 ### 3. **Logger — Структурированное логирование**
 
-#### 📌 Назначение
-Гибкая система логирования с поддержкой уровней, атрибутов и структурированного вывода (JSON).
+Интеграция с `log/slog`, цветной вывод, уровни, контекст.
 
-#### 🧩 Реализация
+#### 📌 Возможности:
+- Поддержка `text` и `JSON` форматов
+- Цвета в терминале
+- Добавление контекста через `With(...)`
+- Уровни: `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`
 
-- **Модуль**: `logger.Module`
-- **Интерфейс**:
-  ```go
-  type Logger interface {
-      Trace(msg string, args ...any)
-      Debug(msg string, args ...any)
-      Info(msg string, args ...any)
-      Warn(msg string, args ...any)
-      Error(msg string, args ...any)
-      Critical(msg string, args ...any)
-      With(args ...any) Logger
-  }
-  ```
-
-- Поддерживает `slog` из стандартной библиотеки.
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
 log := container.Get("logger").(logger.Logger)
-log.Info("User logged in", "user_id", "123", "ip", "192.168.1.1")
-
-// С добавлением контекста
+log.Info("User logged in", "user_id", "123")
 scopedLog := log.With("service", "auth")
-scopedLog.Error("Failed to authenticate", "error", err)
+scopedLog.Error("Auth failed", "error", err)
 ```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `nil logger` | Логгер не зарегистрирован | Убедитесь, что `logger.NewModule()` добавлен |
-
-#### 🛠️ Рекомендации
-- Используйте `With()` для добавления постоянных атрибутов.
-- Настройте уровень логирования в зависимости от окружения.
 
 ---
 
-### 4. **CLI — Система команд**
+### 4. **HTTP — Модуль HTTP-сервера**
 
-#### 📌 Назначение
-Поддержка CLI-приложений с командами, флагами, справкой и валидацией.
+Полноценный HTTP-сервер с поддержкой:
+- REST, WebSockets
+- Файловых загрузок
+- Потоковой передачи
+- Контекста запроса
+- Обработки ошибок
 
-#### 🧩 Реализация
-
-- **Компоненты**:
-    - `CliCommand`: интерфейс команды
-    - `CliRegistry`: реестр команд
-    - `HelpCommand`: встроенная команда `help`
-
-- **Интерфейс команды**:
-  ```go
-  type CliCommand interface {
-      Name() string
-      Description() string
-      Group() string
-      Configure(*flag.FlagSet)
-      Validate(CliContext) error
-      Execute(CliContext) error
-  }
-  ```
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
-type MyCommand struct{}
+ctx.Status(200).JSON(map[string]string{"message": "ok"})
+ctx.FileUpload().FormFile("avatar")
+ctx.Websocket().Upgrade()
+ctx.Streaming().WriteStringChunk("Hello")
+```
 
-func (c *MyCommand) Name() string        { return "greet" }
-func (c *MyCommand) Description() string { return "Say hello" }
-func (c *MyCommand) Configure(f *flag.FlagSet) { f.String("name", "", "Name to greet") }
-func (c *MyCommand) Execute(ctx CliContext) error {
-    name := ctx.Flag("name").String()
-    fmt.Fprintf(ctx.Output(), "Hello, %s!\n", name)
+---
+
+### 5. **Events — Событийная шина**
+
+Публикация и подписка на события с поддержкой `context`.
+
+#### 💡 Пример:
+```go
+bus.Publish(ctx, UserCreatedEvent{ID: "123"})
+bus.Subscribe(ctx, func(ctx context.Context, e UserCreatedEvent) error {
+    log.Info("User created", "id", e.ID)
     return nil
-}
-
-// Регистрация
-cliModule := cli.NewModule()
-cliModule.Register(&MyCommand{})
+})
 ```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrCommandExecution` | Ошибка выполнения | Проверьте `Execute()` |
-| `ErrFlagParse` | Ошибка парсинга флагов | Убедитесь, что флаги объявлены корректно |
-
-#### 🛠️ Рекомендации
-- Используйте `HelpCommand` для автоматической генерации справки.
-- Группируйте команды по функциональности (`system`, `db`, `user`).
 
 ---
 
-### 5. **Database — Работа с БД**
+### 6. **Queue — Очереди задач**
 
-#### 📌 Назначение
-Поддержка подключения к БД, пулов соединений, миграций, репозиториев и транзакций.
+Фоновая обработка задач с поддержкой:
+- Redis-брокера
+- Retry, DLQ
+- Автоматической регистрации обработчиков
 
-#### 🧩 Реализация
-
-- **Компоненты**:
-    - `NewDatabase(dsn, opts...)`: настраиваемое подключение
-    - `Migration`: DSL для миграций
-    - `TransactionalRepository`: типобезопасный репозиторий
-
-- **Опции**:
-    - `WithConnectionPool(maxOpen, maxIdle, maxLifetime)`
-    - `WithRetry(attempts, delay)`
-
-#### 💡 Пример использования
-
-```go
-db := database.NewDatabase("postgres", dsn,
-    database.WithConnectionPool(25, 5, time.Hour),
-)
-
-// Миграция
-migration := database.CreateMigration("001").
-    CreateTable("users", "id SERIAL PRIMARY KEY", "name TEXT").
-    Build()
-
-err := migration.Apply(db)
-```
-
-#### Репозиторий
-
-```go
-type User struct { /* ... */ }
-type UserMemento struct { /* ... */ }
-
-repo := database.NewSimpleRepository[User, database.UUID, UserMemento](db, userMapper)
-
-user, err := repo.FindByID(ctx, id)
-```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrFailedToPing` | Нет связи с БД | Проверьте DSN и доступность сервера |
-| `ErrNoMigrationsToRollback` | Нечего откатывать | Убедитесь, что миграции применялись |
-
-#### 🛠️ Рекомендации
-- Всегда используйте `WithRetry` для отказоустойчивости.
-- Храните миграции в отдельной директории.
-
----
-
-### 6. **Config — Система конфигурации**
-
-#### 📌 Назначение
-Загрузка конфигурации из нескольких источников: YAML, env, JSON с приоритетами.
-
-#### 🧩 Реализация
-
-- **Лоадеры**:
-    - `YamlConfigLoader`
-    - `EnvConfigLoader`
-    - `JSONConfigLoader`
-    - `ChainLoader` — объединяет несколько источников
-
-- **Интерфейс**:
-  ```go
-  type Loader interface {
-      Load() (map[string]any, error)
-  }
-  ```
-
-#### 💡 Пример использования
-
-```go
-loader := config.NewChainLoader(
-    config.NewYamlConfigLoader("config.yaml"),
-    config.NewEnvConfigLoader("APP_"),
-)
-
-cfg := config.NewMapConfig(loader.Load())
-
-port := cfg.GetInt("server.port", 8080)
-debug := cfg.GetBool("debug", false)
-```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrParseYAML` | Ошибка парсинга YAML | Проверьте синтаксис |
-| `ErrParseJSON` | Ошибка JSON | Используйте валидатор |
-
-#### 🛠️ Рекомендации
-- Используйте `ChainLoader` для override значений.
-- Предпочитайте `env` для production.
-
----
-
-### 7. **Events — Система событий (Pub/Sub)**
-
-#### 📌 Назначение
-Асинхронная передача событий между модулями с гарантией безопасности.
-
-#### 🧩 Реализация
-
-- **Интерфейс**:
-  ```go
-  type Bus interface {
-      Subscribe(eventType any, listener any) error
-      Publish(ctx context.Context, event any) error
-      Close() error
-  }
-  ```
-
-- Поддержка типизированных слушателей:
-  ```go
-  func handleUserCreated(ctx context.Context, event UserCreated) error
-  ```
-
-#### 💡 Пример использования
-
-```go
-bus.Subscribe((*UserCreated)(nil), handleUserCreated)
-bus.Publish(ctx, UserCreated{UserID: "123", Email: "user@example.com"})
-```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrInvalidListener` | Неверная сигнатура слушателя | Используйте `func(context.Context, T) error` |
-
-#### 🛠️ Рекомендации
-- Слушатели должны быть идемпотентными.
-- Не выполняйте долгие операции в слушателях — используйте очереди.
-
----
-
-### 8. **Queue — Очереди задач**
-
-#### 📌 Назначение
-Обработка фоновых задач с поддержкой retry, DLQ (Dead Letter Queue), метрик и Redis-брокера.
-
-#### 🧩 Реализация
-
-- **Брокер**: `redis.Broker`
-- **Сообщение**: `IQueueMessage`
-- **Обработчики ошибок и паник**
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
 type SendEmailJob struct {
     To      string `json:"to"`
     Subject string `json:"subject"`
 }
-
-err := broker.Produce(ctx, "email", job)
+queue.Produce(ctx, "emails", &SendEmailJob{To: "user@example.com", Subject: "Hello"})
 ```
-
-#### Обработчик
-
-```go
-broker.Subscribe("email", func(ctx context.Context, job SendEmailJob) error {
-    return sendEmail(job.To, job.Subject)
-})
-```
-
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `ErrMarshal` | Ошибка сериализации | Убедитесь, что структура экспортируема |
-| `ErrSendToDLQ` | Ошибка отправки в DLQ | Проверьте подключение к Redis |
-
-#### 🛠️ Рекомендации
-- Используйте `Retry` для временных сбоев.
-- Настройте мониторинг DLQ.
 
 ---
 
-### 9. **Errors — Структурированные ошибки**
+### 7. **Database — Репозиторий и ORM**
 
-#### 📌 Назначение
-Богатая система ошибок с кодами, деталями, стеком и причинами.
+Работа с базой данных через интерфейс репозитория.
 
-#### 🧩 Реализация
+#### 📌 Поддержка:
+- CRUD операций
+- Поиска, пагинации, счётчика
+- Transactional репозитория
+- UUID, IntID, StringID
 
-- **Типы**:
-    - `Code`: уникальный код ошибки
-    - `Error`: расширенная ошибка с `Stack`, `Timestamp`, `Details`
-
-- **Функции**:
-  ```go
-  errors.WithPrefix("AUTH")
-  code.New("failed to login")
-  err.WithDetail("user_id", "123").WithCause(originalErr)
-  ```
-
-#### 💡 Пример использования
-
+#### 💡 Пример:
 ```go
-var ErrLoginFailed = errors.WithPrefix("AUTH").New("login failed")
+user := TestUser{ID: NewUUID(), Name: "Alice"}
+repo.Save(ctx, user)
+found, err := repo.Find(ctx, user.ID)
+```
 
-func Login(user string) error {
-    if !valid {
-        return ErrLoginFailed.WithDetail("user", user)
-    }
+---
+
+### 8. **Errors — Расширенная система ошибок**
+
+Гибкая система ошибок с:
+- Уникальными кодами (например, `APP_0001`)
+- Деталями, стек-трейсом, причинами
+- Поддержкой `errors.Is`, `errors.As`
+- Конкурентной безопасностью
+
+#### 💡 Пример:
+```go
+var ErrValidation = errors.WithPrefix("AUTH").New("invalid credentials")
+return ErrValidation.WithDetail("field", "email").WithCause(originalErr)
+```
+
+---
+
+### 9. **CLI — Командная строка**
+
+Регистрация и выполнение CLI-команд.
+
+#### 💡 Пример:
+```go
+cmd := &testCommand{
+    name:        "greet",
+    description: "Say hello",
 }
+cli.Register(cmd)
+cli.Run(appCtx)
 ```
 
-#### ⚠️ Возможные ошибки
-| Ошибка | Причина | Решение |
-|-------|--------|--------|
-| `nil error` | Забыли вернуть ошибку | Используйте `errors.Is()` для проверки |
+---
 
-#### 🛠️ Рекомендации
-- Назначайте уникальные префиксы (`AUTH`, `DB`, `QUEUE`).
-- Всегда добавляйте контекст через `WithDetail()`.
+### 10. **Config — Конфигурация**
+
+Поддержка нескольких источников:
+- Файлы: JSON, YAML
+- Environment variables
+- Флаги командной строки
 
 ---
 
-### 10. **Testing — Встроенные тестовые утилиты**
+## 🛠️ Инструменты
 
-#### 📌 Назначение
-Упрощение тестирования модулей, DI, CLI, событий.
-
-#### 🛠️ Рекомендации
-- Используйте `mockModule` для тестирования жизненного цикла.
-- Покрывайте тестами >80% (требование CI).
-- Используйте `Makefile`:
-  ```bash
-  make test
-  make test-coverage
-  make lint
-  make ci
-  ```
+```bash
+make deps       # Установка зависимостей
+make fmt        # Форматирование кода
+make lint       # Запуск линтеров
+make vet        # Проверка go vet
+make test       # Запуск тестов с race detector
+make test-coverage  # С отчётом покрытия
+make bench      # Бенчмарки
+make ci         # Полная проверка (для CI)
+make clean      # Очистка
+```
 
 ---
 
-## 🧪 CI/CD и инструменты
+## 📊 CI/CD
 
-### Makefile
-
-| Цель | Описание |
-|------|---------|
-| `fmt` | Форматирование кода |
-| `lint` | Проверка стиля и ошибок |
-| `test` | Запуск тестов |
-| `test-coverage` | С покрытием |
-| `ci` | Полная проверка (для CI) |
-| `install-tools` | Установка `golangci-lint`, `gosec` и др. |
-
-### GitHub Actions
-
-- Автозапуск тестов, линтеров, security-сканирования (`gosec`)
-- Отправка отчётов в Codecov
-- Построение SARIF для GitHub Security
+- GitHub Actions: запуск тестов, линтеров, security-сканирования (`gosec`)
+- Codecov: отчёт о покрытии
+- SARIF: интеграция с GitHub Security
 
 ---
-
-## 📊 Метрики качества
-
-| Показатель | Требование |
-|-----------|-----------|
-| Test Coverage | >80% |
-| Go Report | A+ |
-| Cyclomatic Complexity | <10 |
-| Maintainability Index | >70 |
-
 
 ## 🎯 Roadmap
 
-- [ ] HTTP модуль с middleware
-- [ ] Metrics & Monitoring (Prometheus)
-- [ ] Distributed tracing
-- [ ] GraphQL поддержка
+- [ ] Поддержка GraphQL
 - [ ] gRPC интеграция
-- [ ] WebSocket поддержка
+- [ ] Distributed tracing (OpenTelemetry)
+- [ ] Prometheus metrics
+- [ ] Health checks
+- [ ] Admin UI
+
+---
 
 ## 🤝 Участие в разработке
 
 1. Fork репозитория
 2. Создайте feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit изменения (`git commit -m 'Add amazing feature'`)
-4. Push в branch (`git push origin feature/amazing-feature`)
+3. Commit изменений (`git commit -m 'Add amazing feature'`)
+4. Push в ветку (`git push origin feature/amazing-feature`)
 5. Откройте Pull Request
 
 ### Требования к коду
-
 - Покрытие тестами >80%
 - Проходит все линтеры
-- Следует Go conventions
+- Соответствует Go conventions
 - Документирован публичный API
+
+---
 
 ## 📄 Лицензия
 
-Этот проект лицензирован под MIT License - подробности в файле [LICENSE](LICENSE).
+MIT License — подробности в файле [LICENSE](LICENSE).

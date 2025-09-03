@@ -2,9 +2,11 @@ package errors
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sync/atomic"
 	"text/template"
 	"time"
 )
@@ -22,10 +24,10 @@ func (c Code) New(msg string) *Error {
 }
 
 func WithPrefix(prefix string) func() Code {
-	counter := int64(0)
+	counter := uint64(0)
 	return func() Code {
-		counter++
-		return Code(fmt.Sprintf("%s_%04d", prefix, counter))
+		next := atomic.AddUint64(&counter, 1)
+		return Code(fmt.Sprintf("%s_%04d", prefix, next))
 	}
 }
 
@@ -91,17 +93,50 @@ func (e *Error) formatSimpleMessage() string {
 }
 
 func (e *Error) WithCause(err error) *Error {
-	e.Cause = err
-	return e
+	clone := &Error{
+		Code:      e.Code,
+		Message:   e.Message,
+		Details:   make(map[string]interface{}),
+		Cause:     err,
+		Stack:     e.Stack,
+		Timestamp: e.Timestamp,
+	}
+
+	for k, v := range e.Details {
+		clone.Details[k] = v
+	}
+
+	return clone
 }
 
 func (e *Error) WithDetail(key string, value interface{}) *Error {
-	e.Details[key] = value
-	return e
+	clone := &Error{
+		Code:      e.Code,
+		Message:   e.Message,
+		Details:   make(map[string]interface{}),
+		Cause:     e.Cause,
+		Stack:     e.Stack,
+		Timestamp: e.Timestamp,
+	}
+
+	for k, v := range e.Details {
+		clone.Details[k] = v
+	}
+	clone.Details[key] = value
+
+	return clone
 }
 
 func (e *Error) Unwrap() error {
 	return e.Cause
+}
+
+func (e *Error) Is(target error) bool {
+	var targetErr *Error
+	if errors.As(target, &targetErr) {
+		return e.Code == targetErr.Code
+	}
+	return false
 }
 
 func getStack() string {

@@ -28,7 +28,6 @@ func NewHTTPRequest(method, url string, body interface{}) *HTTPRequestImpl {
 		case string:
 			req.body = []byte(v)
 		default:
-			// Try to marshal as JSON
 			if data, err := json.Marshal(body); err == nil {
 				req.body = data
 				req.headers["Content-Type"] = []string{"application/json"}

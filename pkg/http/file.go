@@ -139,9 +139,6 @@ func (f *httpFileImpl) Save(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("path cannot be empty")
 	}
-	if !isPathSafe("", path) {
-		return errors.New("unsafe file path")
-	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)

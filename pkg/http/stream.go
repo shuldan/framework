@@ -50,23 +50,15 @@ func (s *StreamingContext) SetContentType(contentType string) contracts.HTTPStre
 }
 
 func (s *StreamingContext) WriteChunk(data []byte) error {
-	if s.ctx.responseSent {
-		return ErrResponseAlreadySent
-	}
-
-	if _, exists := s.ctx.resp.Header()["Content-Type"]; !exists {
-		s.ctx.SetHeader("Content-Type", "text/plain")
-	}
-
 	if s.ctx.statusCode == 0 {
+		if _, exists := s.ctx.resp.Header()["Content-Type"]; !exists {
+			s.ctx.SetHeader("Content-Type", "text/plain")
+		}
 		s.ctx.statusCode = http.StatusOK
 		s.ctx.resp.WriteHeader(s.ctx.statusCode)
-		s.ctx.responseSent = true
 	}
-
 	_, err := s.ctx.resp.Write(data)
 	s.Flush()
-
 	return err
 }
 

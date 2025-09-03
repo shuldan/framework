@@ -229,14 +229,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) matchRoute(method, path string) (*Route, map[string]string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
 	for _, route := range r.routes {
 		if route.method != method {
 			continue
 		}
-
 		if params := r.matchPattern(route.pattern, path); params != nil {
-			// Создаем копию роута для безопасности
 			routeCopy := route
 			return &routeCopy, params
 		}

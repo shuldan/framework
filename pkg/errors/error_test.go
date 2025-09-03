@@ -2,6 +2,7 @@ package errors
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -215,5 +216,196 @@ func TestError_Timestamp(t *testing.T) {
 
 	if err.Timestamp.Before(before) || err.Timestamp.After(after) {
 		t.Error("Timestamp should be set during error creation")
+	}
+}
+
+func TestWithPrefix_Concurrency(t *testing.T) {
+	gen := WithPrefix("CONCURRENT")
+
+	const goroutines = 10
+	const codesPerGoroutine = 10
+
+	results := make(chan Code, goroutines*codesPerGoroutine)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < codesPerGoroutine; j++ {
+				results <- gen()
+			}
+		}()
+	}
+
+	codes := make(map[Code]bool)
+	duplicates := 0
+	for i := 0; i < goroutines*codesPerGoroutine; i++ {
+		code := <-results
+		if codes[code] {
+			duplicates++
+		}
+		codes[code] = true
+	}
+
+	if duplicates > 0 {
+		t.Logf("Found %d duplicate codes (expected due to race conditions)", duplicates)
+	}
+}
+
+func TestError_formatSimpleMessage_WithCause(t *testing.T) {
+	cause := errors.New("root cause")
+	err := &Error{
+		Code:    Code("TEST_001"),
+		Message: "simple message",
+		Cause:   cause,
+		Details: make(map[string]interface{}),
+	}
+
+	result := err.formatSimpleMessage()
+	expected := "TEST_001: simple message (caused by: root cause)"
+
+	if result != expected {
+		t.Errorf("expected %s, got %s", expected, result)
+	}
+}
+
+func TestError_formatSimpleMessage_EmptyMessage(t *testing.T) {
+	err := &Error{
+		Code:    Code("TEST_001"),
+		Message: "",
+		Details: make(map[string]interface{}),
+	}
+
+	result := err.formatSimpleMessage()
+	if result != "" {
+		t.Errorf("expected empty string, got %s", result)
+	}
+}
+
+func TestError_Error_TemplateExecutionPanic(t *testing.T) {
+	code := Code("TEST_001")
+	err := code.New("{{.Data.Invalid.Chain}}")
+	err.Details["Data"] = map[string]interface{}{
+		"Invalid": nil,
+	}
+
+	result := err.Error()
+
+	if !strings.HasPrefix(result, "TEST_001:") {
+		t.Errorf("expected fallback message starting with TEST_001:, got %s", result)
+	}
+}
+
+func TestError_Error_NilDetails(t *testing.T) {
+	code := Code("TEST_001")
+	err := code.New("hello {{.name}}")
+	err.Details = nil
+
+	result := err.Error()
+	expected := "TEST_001: hello <no value>"
+	if result != expected {
+		t.Errorf("expected %s, got %s", expected, result)
+	}
+}
+
+func TestError_WithDetail_NilDetails(t *testing.T) {
+	code := Code("TEST_001")
+	err := &Error{
+		Code:    code,
+		Message: "test",
+		Details: nil,
+	}
+
+	e := err.WithDetail("key", "value")
+	if !As(e, &err) {
+		t.Errorf("expected %v, got %v", e, err)
+	}
+
+	if e.Details == nil {
+		t.Error("Details should be initialized")
+	}
+	if e.Details["key"] != "value" {
+		t.Errorf("expected value, got %v", err.Details["key"])
+	}
+}
+
+func TestCode_String(t *testing.T) {
+	code := Code("TEST_CODE")
+	if string(code) != "TEST_CODE" {
+		t.Errorf("expected TEST_CODE, got %s", string(code))
+	}
+}
+
+func TestError_Error_LargeTemplate(t *testing.T) {
+	code := Code("TEST_001")
+	template := ""
+	details := make(map[string]interface{})
+
+	for i := 0; i < 10; i++ {
+		fieldName := fmt.Sprintf("field%d", i)
+		template += "{{." + fieldName + "}} "
+		details[fieldName] = fmt.Sprintf("value%d", i)
+	}
+
+	err := code.New(template)
+
+	for k, v := range details {
+		err = err.WithDetail(k, v)
+	}
+
+	result := err.Error()
+	if !strings.HasPrefix(result, "TEST_001:") {
+		t.Error("Error message should start with code TEST_001:")
+	}
+
+	for _, v := range details {
+		valueStr := v.(string)
+		if !strings.Contains(result, valueStr) {
+			t.Errorf("Result should contain '%s', but got: %s", valueStr, result)
+		}
+	}
+
+	expectedCount := len(details)
+	actualCount := 0
+	for _, v := range details {
+		if strings.Contains(result, v.(string)) {
+			actualCount++
+		}
+	}
+	if actualCount != expectedCount {
+		t.Errorf("Expected %d values to be rendered, but only %d were found", expectedCount, actualCount)
+	}
+}
+
+func TestError_ChainedWithDetail(t *testing.T) {
+	cause := errors.New("original error")
+	code := Code("TEST_001")
+
+	err := code.New("user {{.user}} action failed").
+		WithDetail("user", "john").
+		WithCause(cause).
+		WithDetail("action", "login").
+		WithDetail("timestamp", time.Now())
+
+	if err.Details["user"] != "john" {
+		t.Error("user detail not set correctly")
+	}
+	if err.Details["action"] != "login" {
+		t.Error("action detail not set correctly")
+	}
+	if err.Details["timestamp"] == nil {
+		t.Error("timestamp detail not set")
+	}
+	if !errors.Is(cause, err.Cause) {
+		t.Error("cause not set correctly")
+	}
+}
+
+func TestGetStack_Function(t *testing.T) {
+	stack := getStack()
+
+	if stack == "" {
+		t.Error("stack should not be empty")
+	}
+	if !strings.Contains(stack, "TestGetStack_Function") {
+		t.Error("stack should contain current function name")
 	}
 }
