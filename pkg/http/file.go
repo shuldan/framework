@@ -12,14 +12,14 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type FileUpload struct {
+type httpFileUpload struct {
 	ctx    *httpContext
 	parsed bool
 	form   *multipart.Form
 	logger contracts.Logger
 }
 
-func (f *FileUpload) Parse(maxMemory int64) error {
+func (f *httpFileUpload) Parse(maxMemory int64) error {
 	if f.parsed {
 		return nil
 	}
@@ -35,7 +35,7 @@ func (f *FileUpload) Parse(maxMemory int64) error {
 	return nil
 }
 
-func (f *FileUpload) FormFile(name string) (contracts.HTTPFile, error) {
+func (f *httpFileUpload) FormFile(name string) (contracts.HTTPFile, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, ErrFileNotFound.WithDetail("name", name).WithDetail("reason", "empty name")
 	}
@@ -58,7 +58,7 @@ func (f *FileUpload) FormFile(name string) (contracts.HTTPFile, error) {
 	return &httpFileImpl{header: files[0], logger: f.logger}, nil
 }
 
-func (f *FileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
+func (f *httpFileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
 	if !f.parsed {
 		if err := f.Parse(32 << 20); err != nil {
 			return nil, err
@@ -82,7 +82,7 @@ func (f *FileUpload) FormFiles(name string) ([]contracts.HTTPFile, error) {
 	return files, nil
 }
 
-func (f *FileUpload) FormValue(name string) string {
+func (f *httpFileUpload) FormValue(name string) string {
 	if !f.parsed {
 		if err := f.Parse(32 << 20); err != nil {
 			return ""
@@ -98,7 +98,7 @@ func (f *FileUpload) FormValue(name string) string {
 	return values[0]
 }
 
-func (f *FileUpload) FormValues(name string) []string {
+func (f *httpFileUpload) FormValues(name string) []string {
 	if !f.parsed {
 		if err := f.Parse(32 << 20); err != nil {
 			return []string{}

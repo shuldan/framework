@@ -241,15 +241,15 @@ func (c *httpContext) StatusCode() int {
 }
 
 func (c *httpContext) FileUpload() contracts.HTTPFileUpload {
-	return &FileUpload{ctx: c, logger: c.logger}
+	return &httpFileUpload{ctx: c, logger: c.logger}
 }
 
 func (c *httpContext) Streaming() contracts.HTTPStreamingContext {
-	return &StreamingContext{ctx: c}
+	return &httpStreamingContext{ctx: c}
 }
 
 func (c *httpContext) Websocket() contracts.HTTPWebsocketContext {
-	return &WebsocketContext{ctx: c, logger: c.logger}
+	return &httpWebsocketContext{ctx: c, logger: c.logger}
 }
 
 func generateRequestID() string {

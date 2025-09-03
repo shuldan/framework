@@ -9,14 +9,14 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type StreamingContext struct {
+type httpStreamingContext struct {
 	ctx     *httpContext
 	flusher http.Flusher
 	closed  chan struct{}
 	once    sync.Once
 }
 
-func (s *StreamingContext) CloseNotify() <-chan struct{} {
+func (s *httpStreamingContext) CloseNotify() <-chan struct{} {
 	s.once.Do(func() {
 		s.closed = make(chan struct{})
 
@@ -30,7 +30,7 @@ func (s *StreamingContext) CloseNotify() <-chan struct{} {
 	return s.closed
 }
 
-func (s *StreamingContext) IsClientClosed() bool {
+func (s *httpStreamingContext) IsClientClosed() bool {
 	select {
 	case <-s.CloseNotify():
 		return true
@@ -39,17 +39,17 @@ func (s *StreamingContext) IsClientClosed() bool {
 	}
 }
 
-func (s *StreamingContext) SetHeader(key, value string) contracts.HTTPStreamingContext {
+func (s *httpStreamingContext) SetHeader(key, value string) contracts.HTTPStreamingContext {
 	s.ctx.SetHeader(key, value)
 	return s
 }
 
-func (s *StreamingContext) SetContentType(contentType string) contracts.HTTPStreamingContext {
+func (s *httpStreamingContext) SetContentType(contentType string) contracts.HTTPStreamingContext {
 	s.ctx.SetHeader("Content-Type", contentType)
 	return s
 }
 
-func (s *StreamingContext) WriteChunk(data []byte) error {
+func (s *httpStreamingContext) WriteChunk(data []byte) error {
 	if s.ctx.statusCode == 0 {
 		if _, exists := s.ctx.resp.Header()["Content-Type"]; !exists {
 			s.ctx.SetHeader("Content-Type", "text/plain")
@@ -62,11 +62,11 @@ func (s *StreamingContext) WriteChunk(data []byte) error {
 	return err
 }
 
-func (s *StreamingContext) WriteStringChunk(str string) error {
+func (s *httpStreamingContext) WriteStringChunk(str string) error {
 	return s.WriteChunk([]byte(str))
 }
 
-func (s *StreamingContext) Flush() {
+func (s *httpStreamingContext) Flush() {
 	if s.flusher == nil {
 		s.flusher, _ = s.ctx.resp.(http.Flusher)
 	}

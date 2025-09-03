@@ -218,9 +218,9 @@ func (h *errorHandler) logError(_ context.Context, err error, errorType string, 
 
 	switch {
 	case statusCode >= 500:
-		h.logger.Error("Server error", args...)
+		h.logger.Error("httpServer error", args...)
 	case statusCode >= 400:
-		h.logger.Warn("Client error", args...)
+		h.logger.Warn("httpClient error", args...)
 	default:
 		h.logger.Info("Request error", args...)
 	}

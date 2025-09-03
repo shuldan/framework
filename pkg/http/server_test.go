@@ -18,21 +18,24 @@ func TestServer(t *testing.T) {
 	router.GET("/health", func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "healthy"})
 	})
-	server := NewServer(":0", router, logger)
+	server, err := NewServer(":0", router, logger)
+	if err != nil {
+		t.Errorf("NewServer should not return an error: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := server.Start(ctx); err != nil {
-		t.Fatalf("Server start failed: %v", err)
+		t.Fatalf("httpServer start failed: %v", err)
 	}
 	defer func(server contracts.HTTPServer, ctx context.Context) {
 		err := server.Stop(ctx)
 		if err != nil {
-			t.Fatalf("Server stop failed: %v", err)
+			t.Fatalf("httpServer stop failed: %v", err)
 		}
 	}(server, ctx)
 	addr := server.Addr()
 	if addr == "" {
-		t.Fatal("Server address is empty")
+		t.Fatal("httpServer address is empty")
 	}
 	resp, err := http.Get("http://" + addr + "/health")
 	if err != nil {
@@ -48,7 +51,7 @@ func TestServer(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 	if err := server.Stop(ctx); err != nil {
-		t.Errorf("Server stop failed: %v", err)
+		t.Errorf("httpServer stop failed: %v", err)
 	}
 }
 
@@ -57,7 +60,10 @@ func TestServerAlreadyRunning(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server := NewServer("", router, logger)
+	server, err := NewServer("", router, logger)
+	if err != nil {
+		t.Errorf("NewServer should not return an error: %v", err)
+	}
 
 	ctx := context.Background()
 
@@ -78,14 +84,10 @@ func TestServerAlreadyRunning(t *testing.T) {
 
 func TestServerPanicOnNilDependencies(t *testing.T) {
 	t.Parallel()
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic for nil router")
-		}
-	}()
-
-	NewServer("", nil, &mockLogger{})
+	_, err := NewServer("", nil, &mockLogger{})
+	if err == nil {
+		t.Errorf("Expected error for nil router")
+	}
 }
 
 func TestClientCalculateRetryWait(t *testing.T) {
@@ -96,7 +98,7 @@ func TestClientCalculateRetryWait(t *testing.T) {
 		RetryWaitMin: time.Millisecond,
 		RetryWaitMax: time.Second,
 	}
-	client := NewClientWithConfig(logger, config)
+	client := NewClientWithConfig(logger, config).(*httpClient)
 
 	wait1 := client.calculateRetryWait(1)
 	wait2 := client.calculateRetryWait(2)

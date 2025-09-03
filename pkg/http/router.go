@@ -12,15 +12,15 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type Route struct {
+type httpRoute struct {
 	method     string
 	pattern    string
 	handler    contracts.HTTPHandler
 	middleware []contracts.HTTPMiddleware
 }
 
-type Router struct {
-	routes                  []Route
+type httpRouter struct {
+	routes                  []httpRoute
 	middleware              []contracts.HTTPMiddleware
 	errorHandler            contracts.HTTPErrorHandler
 	logger                  contracts.Logger
@@ -29,9 +29,9 @@ type Router struct {
 	mu                      sync.RWMutex
 }
 
-func NewRouter(logger contracts.Logger) *Router {
-	r := &Router{
-		routes: make([]Route, 0),
+func NewRouter(logger contracts.Logger) contracts.HTTPRouter {
+	r := &httpRouter{
+		routes: make([]httpRoute, 0),
 		logger: logger,
 	}
 
@@ -64,45 +64,45 @@ func NewRouter(logger contracts.Logger) *Router {
 	return r
 }
 
-func (r *Router) GET(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) GET(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("GET", path, handler, middleware...)
 }
 
-func (r *Router) POST(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) POST(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("POST", path, handler, middleware...)
 }
 
-func (r *Router) PUT(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) PUT(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("PUT", path, handler, middleware...)
 }
 
-func (r *Router) DELETE(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) DELETE(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("DELETE", path, handler, middleware...)
 }
 
-func (r *Router) PATCH(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) PATCH(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("PATCH", path, handler, middleware...)
 }
 
-func (r *Router) HEAD(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) HEAD(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("HEAD", path, handler, middleware...)
 }
 
-func (r *Router) OPTIONS(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) OPTIONS(path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	r.Handle("OPTIONS", path, handler, middleware...)
 }
 
-func (r *Router) Group(prefix string, middleware ...contracts.HTTPMiddleware) contracts.HTTPRouterGroup {
+func (r *httpRouter) Group(prefix string, middleware ...contracts.HTTPMiddleware) contracts.HTTPRouterGroup {
 	return NewRouterGroup(r, prefix, middleware)
 }
 
-func (r *Router) Use(middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) Use(middleware ...contracts.HTTPMiddleware) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.middleware = append(r.middleware, middleware...)
 }
 
-func (r *Router) Static(path, root string) {
+func (r *httpRouter) Static(path, root string) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		r.logger.Critical("Static: invalid root directory", "root", root, "error", err)
@@ -156,7 +156,7 @@ func (r *Router) Static(path, root string) {
 	})
 }
 
-func (r *Router) StaticFile(path, fPath string) {
+func (r *httpRouter) StaticFile(path, fPath string) {
 	if !isPathSafe("", fPath) {
 		r.logger.Critical("StaticFile: unsafe file path " + fPath)
 		return
@@ -177,7 +177,7 @@ func (r *Router) StaticFile(path, fPath string) {
 	})
 }
 
-func (r *Router) Handle(method, path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
+func (r *httpRouter) Handle(method, path string, handler contracts.HTTPHandler, middleware ...contracts.HTTPMiddleware) {
 	if handler == nil {
 		panic(ErrInvalidHandler)
 	}
@@ -185,7 +185,7 @@ func (r *Router) Handle(method, path string, handler contracts.HTTPHandler, midd
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.routes = append(r.routes, Route{
+	r.routes = append(r.routes, httpRoute{
 		method:     method,
 		pattern:    path,
 		handler:    handler,
@@ -193,7 +193,7 @@ func (r *Router) Handle(method, path string, handler contracts.HTTPHandler, midd
 	})
 }
 
-func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (r *httpRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := NewHTTPContext(w, req, r.logger)
 	req = req.WithContext(context.WithValue(req.Context(), ContextKey, ctx))
 
@@ -226,7 +226,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (r *Router) matchRoute(method, path string) (*Route, map[string]string) {
+func (r *httpRouter) matchRoute(method, path string) (*httpRoute, map[string]string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, route := range r.routes {
@@ -241,7 +241,7 @@ func (r *Router) matchRoute(method, path string) (*Route, map[string]string) {
 	return nil, nil
 }
 
-func (r *Router) pathExistsWithDifferentMethod(path, method string) bool {
+func (r *httpRouter) pathExistsWithDifferentMethod(path, method string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -257,7 +257,7 @@ func (r *Router) pathExistsWithDifferentMethod(path, method string) bool {
 	return false
 }
 
-func (r *Router) matchPattern(pattern, path string) map[string]string {
+func (r *httpRouter) matchPattern(pattern, path string) map[string]string {
 	patternParts := strings.Split(strings.Trim(pattern, "/"), "/")
 	pathParts := strings.Split(strings.Trim(path, "/"), "/")
 

@@ -20,7 +20,7 @@ type ClientConfig struct {
 	RetryCondition func(contracts.HTTPResponse, error) bool
 }
 
-func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
+func NewClientWithConfig(logger contracts.Logger, config ClientConfig) contracts.HTTPClient {
 	if config.Timeout == 0 {
 		config.Timeout = 30 * time.Second
 	}
@@ -42,7 +42,7 @@ func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
 		}
 	}
 
-	return &Client{
+	return &httpClient{
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
@@ -51,14 +51,14 @@ func NewClientWithConfig(logger contracts.Logger, config ClientConfig) *Client {
 	}
 }
 
-type Client struct {
+type httpClient struct {
 	client *http.Client
 	logger contracts.Logger
 	config ClientConfig
 }
 
-func NewClient(logger contracts.Logger) *Client {
-	return &Client{
+func NewClient(logger contracts.Logger) contracts.HTTPClient {
+	return &httpClient{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -66,7 +66,7 @@ func NewClient(logger contracts.Logger) *Client {
 	}
 }
 
-func (c *Client) Get(ctx context.Context, url string, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
+func (c *httpClient) Get(ctx context.Context, url string, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
 	req := NewHTTPRequest("GET", url, nil)
 	for _, opt := range opts {
 		opt(req)
@@ -74,7 +74,7 @@ func (c *Client) Get(ctx context.Context, url string, opts ...contracts.HTTPRequ
 	return c.Do(ctx, req)
 }
 
-func (c *Client) Post(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
+func (c *httpClient) Post(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
 	req := NewHTTPRequest("POST", url, body)
 	for _, opt := range opts {
 		opt(req)
@@ -82,7 +82,7 @@ func (c *Client) Post(ctx context.Context, url string, body interface{}, opts ..
 	return c.Do(ctx, req)
 }
 
-func (c *Client) Put(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
+func (c *httpClient) Put(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
 	req := NewHTTPRequest("PUT", url, body)
 	for _, opt := range opts {
 		opt(req)
@@ -90,7 +90,7 @@ func (c *Client) Put(ctx context.Context, url string, body interface{}, opts ...
 	return c.Do(ctx, req)
 }
 
-func (c *Client) Delete(ctx context.Context, url string, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
+func (c *httpClient) Delete(ctx context.Context, url string, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
 	req := NewHTTPRequest("DELETE", url, nil)
 	for _, opt := range opts {
 		opt(req)
@@ -98,7 +98,7 @@ func (c *Client) Delete(ctx context.Context, url string, opts ...contracts.HTTPR
 	return c.Do(ctx, req)
 }
 
-func (c *Client) Patch(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
+func (c *httpClient) Patch(ctx context.Context, url string, body interface{}, opts ...contracts.HTTPRequestOption) (contracts.HTTPResponse, error) {
 	req := NewHTTPRequest("PATCH", url, body)
 	for _, opt := range opts {
 		opt(req)
@@ -106,14 +106,14 @@ func (c *Client) Patch(ctx context.Context, url string, body interface{}, opts .
 	return c.Do(ctx, req)
 }
 
-func (c *Client) Do(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+func (c *httpClient) Do(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	if c.config.MaxRetries == 0 {
 		return c.doSingleRequest(ctx, req)
 	}
 	return c.doWithRetry(ctx, req)
 }
 
-func (c *Client) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+func (c *httpClient) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		if attempt > 0 {
@@ -134,7 +134,7 @@ func (c *Client) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (co
 	return nil, c.wrapRetryError(lastErr)
 }
 
-func (c *Client) doSingleRequest(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+func (c *httpClient) doSingleRequest(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	httpReq, err := c.buildHTTPRequest(ctx, req)
 	if err != nil {
 		return nil, ErrHTTPRequest.WithCause(err)
@@ -146,7 +146,7 @@ func (c *Client) doSingleRequest(ctx context.Context, req contracts.HTTPRequest)
 	return c.processResponse(resp, req)
 }
 
-func (c *Client) buildHTTPRequest(ctx context.Context, req contracts.HTTPRequest) (*http.Request, error) {
+func (c *httpClient) buildHTTPRequest(ctx context.Context, req contracts.HTTPRequest) (*http.Request, error) {
 	body := req.Body()
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), bytes.NewReader(body))
 	if err != nil {
@@ -160,7 +160,7 @@ func (c *Client) buildHTTPRequest(ctx context.Context, req contracts.HTTPRequest
 	return httpReq, nil
 }
 
-func (c *Client) processResponse(resp *http.Response, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
+func (c *httpClient) processResponse(resp *http.Response, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil && c.logger != nil {
 			c.logger.Error("Failed to close response body", "error", closeErr)
@@ -178,7 +178,7 @@ func (c *Client) processResponse(resp *http.Response, req contracts.HTTPRequest)
 	}, nil
 }
 
-func (c *Client) waitForRetry(ctx context.Context, attempt int, url string) error {
+func (c *httpClient) waitForRetry(ctx context.Context, attempt int, url string) error {
 	waitTime := c.calculateRetryWait(attempt)
 	c.logger.Debug("Retrying HTTP request",
 		"attempt", attempt,
@@ -192,7 +192,7 @@ func (c *Client) waitForRetry(ctx context.Context, attempt int, url string) erro
 	}
 }
 
-func (c *Client) calculateRetryWait(attempt int) time.Duration {
+func (c *httpClient) calculateRetryWait(attempt int) time.Duration {
 	waitTime := time.Duration(float64(c.config.RetryWaitMin) * math.Pow(2, float64(attempt-1)))
 	if waitTime > c.config.RetryWaitMax {
 		waitTime = c.config.RetryWaitMax
@@ -205,7 +205,7 @@ func (c *Client) calculateRetryWait(attempt int) time.Duration {
 	return calculated
 }
 
-func (c *Client) generateSecureJitter(waitTime time.Duration) time.Duration {
+func (c *httpClient) generateSecureJitter(waitTime time.Duration) time.Duration {
 	maxJitter := float64(waitTime) * 0.5
 	maxJitterInt := int64(maxJitter)
 	if maxJitterInt <= 0 {
@@ -228,7 +228,7 @@ func (c *Client) generateSecureJitter(waitTime time.Duration) time.Duration {
 	return time.Duration(randomInt64 % maxJitterInt)
 }
 
-func (c *Client) wrapRetryError(lastErr error) error {
+func (c *httpClient) wrapRetryError(lastErr error) error {
 	if lastErr != nil {
 		return ErrHTTPRequest.WithCause(lastErr)
 	}

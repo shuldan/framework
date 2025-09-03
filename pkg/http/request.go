@@ -3,9 +3,11 @@ package http
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type HTTPRequestImpl struct {
+type httpRequest struct {
 	method  string
 	url     string
 	headers map[string][]string
@@ -13,8 +15,8 @@ type HTTPRequestImpl struct {
 	ctx     context.Context
 }
 
-func NewHTTPRequest(method, url string, body interface{}) *HTTPRequestImpl {
-	req := &HTTPRequestImpl{
+func NewHTTPRequest(method, url string, body interface{}) contracts.HTTPRequest {
+	req := &httpRequest{
 		method:  method,
 		url:     url,
 		headers: make(map[string][]string),
@@ -38,38 +40,38 @@ func NewHTTPRequest(method, url string, body interface{}) *HTTPRequestImpl {
 	return req
 }
 
-func (r *HTTPRequestImpl) Method() string {
+func (r *httpRequest) Method() string {
 	return r.method
 }
 
-func (r *HTTPRequestImpl) URL() string {
+func (r *httpRequest) URL() string {
 	return r.url
 }
 
-func (r *HTTPRequestImpl) Header(key string) []string {
+func (r *httpRequest) Header(key string) []string {
 	return r.headers[key]
 }
 
-func (r *HTTPRequestImpl) Headers() map[string][]string {
+func (r *httpRequest) Headers() map[string][]string {
 	return r.headers
 }
 
-func (r *HTTPRequestImpl) Body() []byte {
+func (r *httpRequest) Body() []byte {
 	return r.body
 }
 
-func (r *HTTPRequestImpl) Context() context.Context {
+func (r *httpRequest) Context() context.Context {
 	return r.ctx
 }
 
-func (r *HTTPRequestImpl) SetHeader(key string, values ...string) {
+func (r *httpRequest) SetHeader(key string, values ...string) {
 	r.headers[key] = values
 }
 
-func (r *HTTPRequestImpl) AddHeader(key, value string) {
+func (r *httpRequest) AddHeader(key, value string) {
 	r.headers[key] = append(r.headers[key], value)
 }
 
-func (r *HTTPRequestImpl) SetContext(ctx context.Context) {
+func (r *httpRequest) SetContext(ctx context.Context) {
 	r.ctx = ctx
 }

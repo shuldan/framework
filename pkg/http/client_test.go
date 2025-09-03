@@ -16,7 +16,7 @@ func TestNewClient(t *testing.T) {
 	t.Parallel()
 
 	logger := &mockLogger{}
-	client := NewClient(logger)
+	client := NewClient(logger).(*httpClient)
 
 	if client == nil {
 		t.Fatal("NewClient returned nil")
@@ -43,7 +43,7 @@ func TestNewClientWithConfig(t *testing.T) {
 		RetryWaitMax: 20 * time.Second,
 	}
 
-	client := NewClientWithConfig(logger, config)
+	client := NewClientWithConfig(logger, config).(*httpClient)
 
 	if client == nil {
 		t.Fatal("NewClientWithConfig returned nil")

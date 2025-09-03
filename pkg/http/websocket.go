@@ -18,21 +18,21 @@ import (
 
 const websocketMagicString = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-type WebsocketContext struct {
+type httpWebsocketContext struct {
 	ctx    *httpContext
 	logger contracts.Logger
 }
 
-func (w *WebsocketContext) IsWebsocket() bool {
+func (w *httpWebsocketContext) IsWebsocket() bool {
 	return strings.ToLower(w.ctx.RequestHeader("Connection")) == "upgrade" &&
 		strings.ToLower(w.ctx.RequestHeader("Upgrade")) == "websocket"
 }
 
-func (w *WebsocketContext) Origin() string {
+func (w *httpWebsocketContext) Origin() string {
 	return w.ctx.RequestHeader("Origin")
 }
 
-func (w *WebsocketContext) Subprotocols() []string {
+func (w *httpWebsocketContext) Subprotocols() []string {
 	protocols := w.ctx.RequestHeader("Sec-WebSocket-Protocol")
 	if protocols == "" {
 		return []string{}
@@ -46,7 +46,7 @@ func (w *WebsocketContext) Subprotocols() []string {
 	return result
 }
 
-func (w *WebsocketContext) Upgrade() (contracts.HTTPWebsocketConnection, error) {
+func (w *httpWebsocketContext) Upgrade() (contracts.HTTPWebsocketConnection, error) {
 	if !w.IsWebsocket() {
 		return nil, ErrWebsocketUpgrade.WithDetail("reason", "not a websocket request")
 	}
@@ -92,11 +92,11 @@ func (w *WebsocketContext) Upgrade() (contracts.HTTPWebsocketConnection, error) 
 	return NewWebsocketConnection(conn, bufrw, w.logger), nil
 }
 
-func (w *WebsocketContext) isOriginAllowed(origin string) bool {
+func (w *httpWebsocketContext) isOriginAllowed(origin string) bool {
 	return true
 }
 
-func (w *WebsocketContext) selectSubprotocol() string {
+func (w *httpWebsocketContext) selectSubprotocol() string {
 	clientProtocols := w.Subprotocols()
 	if len(clientProtocols) == 0 {
 		return ""

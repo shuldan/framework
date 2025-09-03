@@ -212,7 +212,7 @@ func SecurityMiddleware() contracts.HTTPMiddleware {
 			ctx.SetHeader("X-XSS-Protection", "1; mode=block")
 			ctx.SetHeader("Referrer-Policy", "strict-origin-when-cross-origin")
 			ctx.SetHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'")
-			ctx.SetHeader("Server", "")
+			ctx.SetHeader("httpServer", "")
 			return next(ctx)
 		}
 	}

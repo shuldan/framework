@@ -11,7 +11,7 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type Server struct {
+type httpServer struct {
 	server  *http.Server
 	router  contracts.HTTPRouter
 	addr    string
@@ -20,25 +20,25 @@ type Server struct {
 	mu      sync.RWMutex
 }
 
-func NewServer(addr string, router contracts.HTTPRouter, logger contracts.Logger) contracts.HTTPServer {
+func NewServer(addr string, router contracts.HTTPRouter, logger contracts.Logger) (contracts.HTTPServer, error) {
 	if router == nil {
-		panic("router cannot be nil")
+		return nil, ErrInvalidHTTPRouterInstance
 	}
 	if logger == nil {
-		panic("logger cannot be nil")
+		return nil, ErrHTTPRouterNotFound
 	}
 	if addr == "" {
 		addr = ":8080"
 	}
 
-	return &Server{
+	return &httpServer{
 		addr:   addr,
 		router: router,
 		logger: logger,
-	}
+	}, nil
 }
 
-func (s *Server) Start(ctx context.Context) error {
+func (s *httpServer) Start(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -78,7 +78,7 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) Stop(ctx context.Context) error {
+func (s *httpServer) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -98,12 +98,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) Addr() string {
+func (s *httpServer) Addr() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.addr
 }
 
-func (s *Server) Handler() http.Handler {
+func (s *httpServer) Handler() http.Handler {
 	return s.router
 }

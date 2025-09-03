@@ -35,7 +35,7 @@ func TestHTTPRequest(t *testing.T) {
 func TestHTTPRequestHeaders(t *testing.T) {
 	t.Parallel()
 
-	req := NewHTTPRequest("GET", "http://example.com", nil)
+	req := NewHTTPRequest("GET", "http://example.com", nil).(*httpRequest)
 	req.SetHeader("Authorization", "Bearer token")
 	req.AddHeader("Accept", "application/json")
 	req.AddHeader("Accept", "text/plain")

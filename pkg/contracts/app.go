@@ -6,12 +6,12 @@ import (
 )
 
 const (
-	CliModuleName      = "cli"
-	EventBusModuleName = "event.bus"
-	LoggerModuleName   = "logger"
-	ConfigModuleName   = "config"
-	DatabaseModuleName = "database"
-	HTTPModuleName     = "http"
+	CliModuleName        = "cli"
+	EventBusModuleName   = "event.bus"
+	LoggerModuleName     = "logger"
+	ConfigModuleName     = "config"
+	HTTPClientModuleName = "http.client"
+	HTTPServerModuleName = "http.server"
 )
 
 type DIContainer interface {
