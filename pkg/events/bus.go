@@ -189,6 +189,9 @@ func (b *bus) Publish(ctx context.Context, event any) error {
 	}
 
 	if b.asyncMode {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		for _, adapter := range adapters {
 			select {
 			case b.eventChan <- eventTask{ctx: ctx, event: event, adapter: adapter}:

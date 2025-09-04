@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/shuldan/framework/pkg/contracts"
+import (
+	"fmt"
+
+	"github.com/shuldan/framework/pkg/contracts"
+)
 
 type cmdExecutor struct {
 	parser *cmdParser
@@ -28,7 +32,13 @@ func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 		return err
 	}
 
-	parsedCtx := newContext(
+	select {
+	case <-commandCtx.Ctx().Ctx().Done():
+		return commandCtx.Ctx().Ctx().Err()
+	default:
+	}
+
+	parsedCtx := NewContext(
 		commandCtx.Ctx(),
 		commandCtx.Input(),
 		commandCtx.Output(),
@@ -41,7 +51,9 @@ func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 	default:
 	}
 
-	if err = parsed.Command.Validate(parsedCtx); err != nil {
+	if err = e.withRecovery(func() error {
+		return parsed.Command.Validate(parsedCtx)
+	}); err != nil {
 		return ErrCommandValidation.WithDetail("command", parsed.Command.Name()).WithCause(err)
 	}
 
@@ -51,9 +63,20 @@ func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 	default:
 	}
 
-	if err = parsed.Command.Execute(parsedCtx); err != nil {
+	if err = e.withRecovery(func() error {
+		return parsed.Command.Execute(parsedCtx)
+	}); err != nil {
 		return ErrCommandExecution.WithDetail("command", parsed.Command.Name()).WithCause(err)
 	}
 
 	return nil
+}
+
+func (e *cmdExecutor) withRecovery(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during command execution: %v", r)
+		}
+	}()
+	return fn()
 }

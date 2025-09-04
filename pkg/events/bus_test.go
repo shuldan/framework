@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -12,13 +13,13 @@ import (
 
 type noOpLogger struct{}
 
-func (l *noOpLogger) Debug(msg string, fields ...interface{})    {}
-func (l *noOpLogger) Info(msg string, fields ...interface{})     {}
-func (l *noOpLogger) Warn(msg string, fields ...interface{})     {}
-func (l *noOpLogger) Error(msg string, fields ...interface{})    {}
-func (l *noOpLogger) Critical(msg string, fields ...interface{}) {}
-func (l *noOpLogger) Trace(msg string, args ...any)              {}
-func (l *noOpLogger) With(args ...any) contracts.Logger          { return l }
+func (l *noOpLogger) Debug(_ string, _ ...interface{})    {}
+func (l *noOpLogger) Info(_ string, _ ...interface{})     {}
+func (l *noOpLogger) Warn(_ string, _ ...interface{})     {}
+func (l *noOpLogger) Error(_ string, _ ...interface{})    {}
+func (l *noOpLogger) Critical(_ string, _ ...interface{}) {}
+func (l *noOpLogger) Trace(_ string, _ ...any)            {}
+func (l *noOpLogger) With(_ ...any) contracts.Logger      { return l }
 
 type TestEvent struct {
 	Message string
@@ -336,5 +337,326 @@ func TestEventBus_ContextCancellation(t *testing.T) {
 	err = b.Publish(ctx, TestEvent{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestListenerAdapter_HandleEvent_InvalidType(t *testing.T) {
+	t.Parallel()
+
+	adapter := &listenerAdapter{
+		eventType: reflect.TypeOf(TestEvent{}),
+		listenerFunc: func(ctx context.Context, event any) error {
+			return nil
+		},
+	}
+
+	err := adapter.handleEvent(context.Background(), TestEventOther{})
+	if err == nil {
+		t.Fatal("expected error for invalid event type")
+	}
+
+	if !errors.Is(err, ErrInvalidEventType) {
+		t.Errorf("expected ErrInvalidEventType, got %v", err)
+	}
+}
+
+func TestAdapterFromFunction_InvalidSignatures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		fn   any
+	}{
+		{"no args", func() error { return nil }},
+		{"one arg", func(ctx context.Context) error { return nil }},
+		{"three args", func(ctx context.Context, e TestEvent, x int) error { return nil }},
+		{"no return", func(ctx context.Context, e TestEvent) {}},
+		{"two returns", func(ctx context.Context, e TestEvent) (int, error) { return 0, nil }},
+		{"wrong first arg", func(s string, e TestEvent) error { return nil }},
+		{"wrong return type", func(ctx context.Context, e TestEvent) string { return "" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := adapterFromFunction(tt.fn)
+			if err == nil {
+				t.Errorf("expected error for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestAdapterFromMethod_InvalidSignatures(t *testing.T) {
+	t.Parallel()
+
+	type InvalidListener struct{}
+
+	var listener InvalidListener
+	listenerVal := reflect.ValueOf(listener)
+
+	tests := []struct {
+		name   string
+		method reflect.Method
+	}{
+		{
+			"wrong arg count",
+			reflect.Method{
+				Type: reflect.TypeOf(func(InvalidListener, context.Context) error { return nil }),
+				Func: reflect.ValueOf(func(InvalidListener, context.Context) error { return nil }),
+			},
+		},
+		{
+			"wrong first arg",
+			reflect.Method{
+				Type: reflect.TypeOf(func(InvalidListener, string, TestEvent) error { return nil }),
+				Func: reflect.ValueOf(func(InvalidListener, string, TestEvent) error { return nil }),
+			},
+		},
+		{
+			"no return",
+			reflect.Method{
+				Type: reflect.TypeOf(func(InvalidListener, context.Context, TestEvent) {}),
+				Func: reflect.ValueOf(func(InvalidListener, context.Context, TestEvent) {}),
+			},
+		},
+		{
+			"wrong return type",
+			reflect.Method{
+				Type: reflect.TypeOf(func(InvalidListener, context.Context, TestEvent) string { return "" }),
+				Func: reflect.ValueOf(func(InvalidListener, context.Context, TestEvent) string { return "" }),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := adapterFromMethod(listenerVal, tt.method)
+			if err == nil {
+				t.Errorf("expected error for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestNewListenerAdapter_InvalidListener(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		listener any
+	}{
+		{"nil", nil},
+		{"invalid value", (*int)(nil)},
+		{"no handle method", struct{}{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newListenerAdapter(tt.listener)
+			if err == nil {
+				t.Errorf("expected error for %s", tt.name)
+			}
+		})
+	}
+}
+
+type TestAsyncListener struct {
+	mu     sync.Mutex
+	events []TestEvent
+}
+
+func (t *TestAsyncListener) Handle(_ context.Context, e TestEvent) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.events = append(t.events, e)
+	return nil
+}
+
+func TestEventBus_AsyncMode(t *testing.T) {
+	t.Parallel()
+
+	b := New(
+		WithAsyncMode(true),
+		WithWorkerCount(2),
+	)
+	defer func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("Close failed: %v", err)
+		}
+	}()
+
+	listener := &TestAsyncListener{}
+	err := b.Subscribe((*TestEvent)(nil), listener)
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		event := TestEvent{Message: "async", Value: i}
+		err = b.Publish(context.Background(), event)
+		if err != nil {
+			t.Fatalf("Publish failed: %v", err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	listener.mu.Lock()
+	count := len(listener.events)
+	listener.mu.Unlock()
+
+	if count != 5 {
+		t.Errorf("expected 5 events, got %d", count)
+	}
+}
+
+func TestEventBus_AsyncContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	b := New(
+		WithAsyncMode(true),
+		WithWorkerCount(1),
+	)
+	defer func() {
+		_ = b.Close()
+	}()
+
+	_ = b.Subscribe((*TestEvent)(nil), func(_ context.Context, _ TestEvent) error {
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := b.Publish(ctx, TestEvent{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func setupBlockedChannelBus() (*bus, *sync.Mutex, func() (context.Context, context.CancelFunc)) {
+	b := New(
+		WithAsyncMode(true),
+		WithWorkerCount(1),
+	)
+
+	var blockingMu sync.Mutex
+	blockingMu.Lock()
+
+	slowListener := func(_ context.Context, _ TestEvent) error {
+		blockingMu.Lock()
+		defer blockingMu.Unlock()
+		return nil
+	}
+
+	_ = b.Subscribe((*TestEvent)(nil), slowListener)
+
+	ctxFunc := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 50*time.Millisecond)
+	}
+
+	return b.(*bus), &blockingMu, ctxFunc
+}
+
+func publishEventsAndCollectErrors(b *bus, ctx context.Context, count int) <-chan error {
+	publishErrors := make(chan error, count)
+	var publishWg sync.WaitGroup
+
+	for i := 0; i < count; i++ {
+		publishWg.Add(1)
+		go func(val int) {
+			defer publishWg.Done()
+			if err := b.Publish(ctx, TestEvent{Value: val}); err != nil {
+				select {
+				case publishErrors <- err:
+				default:
+				}
+			}
+		}(i)
+	}
+
+	go func() {
+		publishWg.Wait()
+		close(publishErrors)
+	}()
+
+	return publishErrors
+}
+
+func TestEventBus_AsyncChannelBlocked(t *testing.T) {
+	t.Parallel()
+	busImpl, blockingMu, ctxFunc := setupBlockedChannelBus()
+	ctx, cancel := ctxFunc()
+	defer cancel()
+	channelCapacity := cap(busImpl.eventChan)
+	publishErrors := publishEventsAndCollectErrors(busImpl, ctx, channelCapacity+5)
+	time.Sleep(25 * time.Millisecond)
+	finalErr := busImpl.Publish(ctx, TestEvent{Message: "final"})
+	if finalErr == nil {
+		t.Errorf("Expected publish to fail due to context deadline, but got nil")
+	} else if !errors.Is(finalErr, context.DeadlineExceeded) {
+		t.Errorf("Expected context.DeadlineExceeded, got %v", finalErr)
+	}
+	blockingMu.Unlock()
+	time.Sleep(10 * time.Millisecond)
+	var errCount int
+	for err := range publishErrors {
+		if err != nil {
+			errCount++
+		}
+	}
+	if errCount == 0 {
+		t.Error("Expected some publish errors due to context timeout")
+	}
+}
+
+func TestEventBus_SubscribeNilEventType(t *testing.T) {
+	t.Parallel()
+
+	b := New()
+	defer func() {
+		_ = b.Close()
+	}()
+
+	err := b.Subscribe(nil, func(_ context.Context, _ TestEvent) error {
+		return nil
+	})
+
+	if err == nil {
+		t.Fatal("expected error for nil event type")
+	}
+
+	if !errors.Is(err, ErrInvalidEventType) {
+		t.Errorf("expected ErrInvalidEventType, got %v", err)
+	}
+}
+
+func TestEventBus_PublishUnknownEventType(t *testing.T) {
+	t.Parallel()
+
+	b := New()
+	defer func() {
+		_ = b.Close()
+	}()
+
+	err := b.Publish(context.Background(), TestEventOther{Data: "unknown"})
+	if err != nil {
+		t.Errorf("publishing unknown event type should not error: %v", err)
+	}
+}
+
+func TestEventBus_CloseIdempotent(t *testing.T) {
+	t.Parallel()
+
+	b := New()
+
+	err := b.Close()
+	if err != nil {
+		t.Errorf("first Close failed: %v", err)
+	}
+
+	err = b.Close()
+	if err != nil {
+		t.Errorf("second Close failed: %v", err)
 	}
 }

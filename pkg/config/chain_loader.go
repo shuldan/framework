@@ -1,10 +1,10 @@
 package config
 
-type ChainLoader struct {
+type chainLoader struct {
 	loaders []Loader
 }
 
-func (c *ChainLoader) Load() (map[string]any, error) {
+func (c *chainLoader) Load() (map[string]any, error) {
 	final := make(map[string]any)
 	var lastErr error
 

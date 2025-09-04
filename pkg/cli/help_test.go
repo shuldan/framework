@@ -92,7 +92,7 @@ func TestHelpCommand_Execute_ShowGeneralHelp(t *testing.T) {
 
 	appCtx := &helpAppContext{}
 	var output bytes.Buffer
-	ctx := newContext(appCtx, nil, &output, []string{})
+	ctx := NewContext(appCtx, nil, &output, []string{})
 
 	if err := helpCmd.Execute(ctx); err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -128,7 +128,7 @@ func TestHelpCommand_Execute_ShowCommandHelp(t *testing.T) {
 
 	appCtx := &helpAppContext{}
 	var output bytes.Buffer
-	ctx := newContext(appCtx, nil, &output, []string{})
+	ctx := NewContext(appCtx, nil, &output, []string{})
 
 	err := helpCmd.Execute(ctx)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestHelpCommand_Execute_ShowCommandHelp_NotFound(t *testing.T) {
 
 	appCtx := &helpAppContext{}
 	var output bytes.Buffer
-	ctx := newContext(appCtx, nil, &output, []string{})
+	ctx := NewContext(appCtx, nil, &output, []string{})
 
 	err := helpCmd.Execute(ctx)
 	if err == nil {

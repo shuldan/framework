@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"os"
-
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
@@ -10,6 +8,23 @@ type cli struct {
 	registry    contracts.CliRegistry
 	cmdParser   *cmdParser
 	cmdExecutor *cmdExecutor
+}
+
+func New(registry contracts.CliRegistry) (contracts.Cli, error) {
+	if registry == nil {
+		registry = NewRegistry()
+	}
+
+	p := newParser(registry)
+	e := newExecutor(p)
+
+	c := &cli{
+		registry:    registry,
+		cmdParser:   p,
+		cmdExecutor: e,
+	}
+
+	return c, nil
 }
 
 func (c *cli) Register(cmd contracts.CliCommand) error {
@@ -20,13 +35,6 @@ func (c *cli) Register(cmd contracts.CliCommand) error {
 	return nil
 }
 
-func (c *cli) Run(appCtx contracts.AppContext) error {
-	return c.cmdExecutor.Execute(
-		newContext(
-			appCtx,
-			os.Stdin,
-			os.Stdout,
-			os.Args[1:],
-		),
-	)
+func (c *cli) Run(ctx contracts.CliContext) error {
+	return c.cmdExecutor.Execute(ctx)
 }

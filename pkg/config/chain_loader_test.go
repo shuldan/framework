@@ -36,7 +36,7 @@ func TestChainLoader_Load_SuccessfulMerge(t *testing.T) {
 		err: nil,
 	}
 
-	chain := &ChainLoader{loaders: []Loader{loader1, loader2}}
+	chain := &chainLoader{loaders: []Loader{loader1, loader2}}
 	result, err := chain.Load()
 
 	if err != nil {
@@ -62,13 +62,13 @@ func TestChainLoader_Load_SuccessfulMerge(t *testing.T) {
 }
 
 func TestChainLoader_Load_ErrorInLoader(t *testing.T) {
-	loader1 := &mockLoader{err: errors.New("failed to load")}
+	loader1 := &mockLoader{err: errors.New("failed to Load")}
 	loader2 := &mockLoader{
 		config: map[string]any{"key": "value"},
 		err:    nil,
 	}
 
-	chain := &ChainLoader{loaders: []Loader{loader1, loader2}}
+	chain := &chainLoader{loaders: []Loader{loader1, loader2}}
 	result, err := chain.Load()
 
 	if err != nil {
@@ -83,7 +83,7 @@ func TestChainLoader_Load_AllLoadersFail(t *testing.T) {
 	loader1 := &mockLoader{err: errors.New("err1")}
 	loader2 := &mockLoader{err: errors.New("err2")}
 
-	chain := &ChainLoader{loaders: []Loader{loader1, loader2}}
+	chain := &chainLoader{loaders: []Loader{loader1, loader2}}
 	_, err := chain.Load()
 
 	if err == nil {
@@ -109,7 +109,7 @@ func TestChainLoader_Load_OverrideWithScalar(t *testing.T) {
 		err: nil,
 	}
 
-	chain := &ChainLoader{loaders: []Loader{loader1, loader2}}
+	chain := &chainLoader{loaders: []Loader{loader1, loader2}}
 	result, err := chain.Load()
 
 	if err != nil {

@@ -42,7 +42,7 @@ func TestEnvConfigLoader_Load(t *testing.T) {
 		}
 	}()
 
-	loader := &EnvConfigLoader{prefix: "APP_"}
+	loader := &envConfigLoader{prefix: "APP_"}
 	config, err := loader.Load()
 
 	if err != nil {
@@ -67,7 +67,7 @@ func TestEnvConfigLoader_Load(t *testing.T) {
 }
 
 func TestEnvConfigLoader_Load_EmptyPrefix(t *testing.T) {
-	loader := &EnvConfigLoader{prefix: ""}
+	loader := &envConfigLoader{prefix: ""}
 	config, err := loader.Load()
 
 	if err != nil {

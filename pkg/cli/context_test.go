@@ -63,7 +63,7 @@ func TestContext(t *testing.T) {
 	output := &bytes.Buffer{}
 	args := []string{"arg1", "arg2"}
 
-	ctx := newContext(appCtx, input, output, args)
+	ctx := NewContext(appCtx, input, output, args)
 
 	if ctx.Ctx() != appCtx {
 		t.Error("Expected same application context")
@@ -94,7 +94,7 @@ func TestContext_ArgsImmutability(t *testing.T) {
 	output := &bytes.Buffer{}
 	args := []string{"arg1", "arg2"}
 
-	ctx := newContext(appCtx, input, output, args)
+	ctx := NewContext(appCtx, input, output, args)
 
 	args[0] = "modified"
 

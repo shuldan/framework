@@ -2,24 +2,24 @@ package config
 
 import "github.com/shuldan/framework/pkg/contracts"
 
-var _ Loader = (*EnvConfigLoader)(nil)
+var _ Loader = (*envConfigLoader)(nil)
 var _ Loader = (*YamlConfigLoader)(nil)
-var _ Loader = (*JSONConfigLoader)(nil)
+var _ Loader = (*jsonConfigLoader)(nil)
 
 func NewEnvConfigLoader(prefix string) Loader {
-	return &EnvConfigLoader{prefix: prefix}
+	return &envConfigLoader{prefix: prefix}
 }
 
-func NewYamlConfigLoader(paths ...string) *YamlConfigLoader {
+func NewYamlConfigLoader(paths ...string) Loader {
 	return &YamlConfigLoader{paths: paths}
 }
 
-func NewJSONConfigLoader(paths ...string) *JSONConfigLoader {
-	return &JSONConfigLoader{paths: paths}
+func NewJSONConfigLoader(paths ...string) Loader {
+	return &jsonConfigLoader{paths: paths}
 }
 
 func NewChainLoader(loaders ...Loader) Loader {
-	return &ChainLoader{loaders: loaders}
+	return &chainLoader{loaders: loaders}
 }
 
 func NewMapConfig(values map[string]any) contracts.Config {
@@ -27,5 +27,5 @@ func NewMapConfig(values map[string]any) contracts.Config {
 }
 
 func NewModule(loader Loader) contracts.AppModule {
-	return &module{loader: loader}
+	return &module{loader: newTemplatedLoader(loader)}
 }

@@ -29,5 +29,5 @@ type CliRegistry interface {
 
 type Cli interface {
 	Register(cmd CliCommand) error
-	Run(appCtx AppContext) error
+	Run(ctx CliContext) error
 }

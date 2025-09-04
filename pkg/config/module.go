@@ -18,7 +18,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(contracts.ConfigModuleName, func(c contracts.DIContainer) (interface{}, error) {
 		values, err := m.loader.Load()
 		if err != nil {
-			return nil, fmt.Errorf("failed to load config: %w", err)
+			return nil, fmt.Errorf("failed to Load config: %w", err)
 		}
 		return NewMapConfig(values), nil
 	})

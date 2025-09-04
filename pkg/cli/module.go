@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"os"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type module struct{}
+
+func NewModule() contracts.AppModule {
+	return &module{}
+}
 
 func (m *module) Name() string {
 	return "cli"
@@ -41,7 +47,11 @@ func (m *module) Start(ctx contracts.AppContext) error {
 		return ErrInvalidConsoleInstance
 	}
 
-	return cInst.Run(ctx)
+	r, w, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	return cInst.Run(NewContext(ctx, r, w, os.Args[1:]))
 }
 
 func (m *module) Stop(contracts.AppContext) error {

@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-type JSONConfigLoader struct {
+type jsonConfigLoader struct {
 	paths []string
 }
 
-func (l *JSONConfigLoader) Load() (map[string]any, error) {
+func (l *jsonConfigLoader) Load() (map[string]any, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = "."

@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-type EnvConfigLoader struct {
+type envConfigLoader struct {
 	prefix string
 }
 
-func (l *EnvConfigLoader) Load() (map[string]any, error) {
+func (l *envConfigLoader) Load() (map[string]any, error) {
 	config := make(map[string]any)
 
 	for _, env := range os.Environ() {

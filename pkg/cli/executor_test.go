@@ -11,7 +11,7 @@ func TestExecutor_Execute(t *testing.T) {
 	executor := newExecutor(parser)
 
 	appCtx := &simpleAppContext{}
-	ctx := newContext(appCtx, nil, nil, []string{})
+	ctx := NewContext(appCtx, nil, nil, []string{})
 	err := executor.Execute(ctx)
 	if err == nil {
 		t.Error("Expected error for no args")
@@ -37,7 +37,7 @@ func TestExecutor_Execute_CancelledContext(t *testing.T) {
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cancelledAppCtx := &simpleAppContext{ctx: cancelledCtx}
-	ctx := newContext(cancelledAppCtx, nil, nil, []string{"test"})
+	ctx := NewContext(cancelledAppCtx, nil, nil, []string{"test"})
 	err = executor.Execute(ctx)
 	if err == nil {
 		t.Error("Expected error for cancelled context")

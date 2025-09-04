@@ -13,6 +13,13 @@ type cmdRegistry struct {
 	groups   map[string][]string
 }
 
+func NewRegistry() contracts.CliRegistry {
+	return &cmdRegistry{
+		commands: make(map[string]contracts.CliCommand),
+		groups:   make(map[string][]string),
+	}
+}
+
 func (r *cmdRegistry) Register(command contracts.CliCommand) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

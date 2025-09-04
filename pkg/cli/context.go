@@ -13,7 +13,7 @@ type cmdContext struct {
 	args   []string
 }
 
-func newContext(
+func NewContext(
 	appCtx contracts.AppContext,
 	input io.Reader,
 	output io.Writer,
