@@ -48,10 +48,6 @@ func WithHTTPTimeout(timeout time.Duration) ServerModuleOption {
 	}
 }
 
-const (
-	httpRouterComponent = "http.router"
-)
-
 type serverModule struct {
 	address string
 	timeout time.Duration
@@ -84,14 +80,14 @@ func (m *serverModule) Register(container contracts.DIContainer) error {
 		return ErrInvalidLoggerInstance
 	}
 
-	if err := container.Factory(httpRouterComponent, func(c contracts.DIContainer) (interface{}, error) {
+	if err := container.Factory(contracts.HTTPRouterModuleName, func(c contracts.DIContainer) (interface{}, error) {
 		return NewRouter(loggerInst), nil
 	}); err != nil {
 		return err
 	}
 
 	return container.Factory(contracts.HTTPServerModuleName, func(c contracts.DIContainer) (interface{}, error) {
-		router, err := c.Resolve(httpRouterComponent)
+		router, err := c.Resolve(contracts.HTTPRouterModuleName)
 		if err != nil {
 			return nil, ErrHTTPRouterNotFound.WithCause(err)
 		}

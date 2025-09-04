@@ -12,6 +12,7 @@ const (
 	ConfigModuleName     = "config"
 	HTTPClientModuleName = "http.client"
 	HTTPServerModuleName = "http.server"
+	HTTPRouterModuleName = "http.router"
 )
 
 type DIContainer interface {
