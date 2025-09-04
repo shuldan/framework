@@ -24,14 +24,22 @@ func (f *httpFileUpload) Parse(maxMemory int64) error {
 		return nil
 	}
 
+	contentType := f.ctx.req.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "multipart/form-data") {
+		f.form = &multipart.Form{
+			Value: make(map[string][]string),
+			File:  make(map[string][]*multipart.FileHeader),
+		}
+		f.parsed = true
+		return nil
+	}
+
 	err := f.ctx.req.ParseMultipartForm(maxMemory)
 	if err != nil {
 		return ErrFormParse.WithCause(err)
 	}
-
 	f.form = f.ctx.req.MultipartForm
 	f.parsed = true
-
 	return nil
 }
 

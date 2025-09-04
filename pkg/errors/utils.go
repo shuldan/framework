@@ -25,3 +25,11 @@ func Unwrap(err error) error {
 func Join(errs ...error) error {
 	return errors.Join(errs...)
 }
+
+func GetErrorCode(err error) Code {
+	var e *Error
+	if As(err, &e) {
+		return e.Code
+	}
+	return ""
+}

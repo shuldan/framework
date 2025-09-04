@@ -112,7 +112,7 @@ func ErrorHandlerMiddleware(errorHandler contracts.ErrorHandler) contracts.HTTPM
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			if err := next(ctx); err != nil {
-				return errorHandler.Handle(ctx.Context(), err)
+				_ = errorHandler.Handle(ctx.Context(), err)
 			}
 			return nil
 		}
@@ -177,7 +177,8 @@ func checkOrigin(config CORSConfig, origin string) (string, bool) {
 	if origin == "" {
 		return "", false
 	}
-	if _, err := url.Parse(origin); err != nil {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", false
 	}
 	switch {

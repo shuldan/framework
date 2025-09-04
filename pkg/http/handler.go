@@ -167,26 +167,26 @@ func (h *errorHandler) Handle(ctx context.Context, err error) error {
 }
 
 func (h *errorHandler) determineErrorType(err error) (string, int) {
-	errorTypes := []*errors.Error{
-		errors.ErrValidation,
-		errors.ErrAuth,
-		errors.ErrPermission,
-		errors.ErrNotFound,
-		errors.ErrConflict,
-		errors.ErrBusiness,
-		errors.ErrTimeout,
-		errors.ErrUnavailable,
+	if err == nil {
+		return "", 0
 	}
 
-	for _, et := range errorTypes {
-		if errors.Is(err, et) {
-			code := string(et.Code)
-			status := h.config.StatusCodeMap()[code]
-			if status == 0 {
-				status = http.StatusInternalServerError
-			}
-			return code, status
+	code := errors.GetErrorCode(err)
+	if code != "" {
+		status := h.config.StatusCodeMap()[string(code)]
+		if status == 0 {
+			status = http.StatusInternalServerError
 		}
+		return string(code), status
+	}
+
+	if parts := strings.SplitN(err.Error(), ":", 2); len(parts) > 1 {
+		errorCode := parts[0]
+		status := h.config.StatusCodeMap()[errorCode]
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		return errorCode, status
 	}
 
 	return string(errors.ErrInternal.Code), http.StatusInternalServerError

@@ -1,10 +1,13 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewHTTPContext(t *testing.T) {
@@ -97,7 +100,7 @@ func TestHTTPContextRedirect(t *testing.T) {
 
 	ctx := NewHTTPContext(w, req, logger)
 
-	if err := ctx.Redirect(302, "https://example.com"); err != nil {
+	if err := ctx.Redirect(302, exampleURL); err != nil {
 		t.Fatalf("Redirect failed: %v", err)
 	}
 
@@ -105,8 +108,8 @@ func TestHTTPContextRedirect(t *testing.T) {
 		t.Errorf("Expected status 302, got %d", w.Code)
 	}
 
-	if location := w.Header().Get("Location"); location != "https://example.com" {
-		t.Errorf("Expected Location https://example.com, got %s", location)
+	if location := w.Header().Get("Location"); location != exampleURL {
+		t.Errorf("Expected Location %s, got %s", exampleURL, location)
 	}
 }
 
@@ -145,7 +148,7 @@ func TestHTTPContextDuplicateResponse(t *testing.T) {
 		t.Fatalf("First response failed: %v", err)
 	}
 
-	if err := ctx.JSON(map[string]string{"second": "response"}); err != ErrResponseAlreadySent {
+	if err := ctx.JSON(map[string]string{"second": "response"}); !errors.Is(err, ErrResponseAlreadySent) {
 		t.Errorf("Expected ErrResponseAlreadySent, got %v", err)
 	}
 }
@@ -177,4 +180,276 @@ func TestHTTPContextBody(t *testing.T) {
 	if string(body2) != bodyContent {
 		t.Error("Second body read should return cached content")
 	}
+}
+
+func TestHTTPContextWithRequestID(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Request-ID", "custom-request-id")
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	if ctx.RequestID() != "custom-request-id" {
+		t.Errorf("Expected custom request ID, got %s", ctx.RequestID())
+	}
+}
+
+func TestHTTPContextSetAndGetParams(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	ctx.Set("user_id", 123)
+	ctx.Set("role", "admin")
+
+	if value, exists := ctx.Get("user_id"); !exists || value != 123 {
+		t.Error("Failed to get user_id parameter")
+	}
+
+	if value, exists := ctx.Get("role"); !exists || value != "admin" {
+		t.Error("Failed to get role parameter")
+	}
+
+	if _, exists := ctx.Get("nonexistent"); exists {
+		t.Error("Should not find nonexistent parameter")
+	}
+}
+
+func TestHTTPContextParamFromString(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	ctx.Set("id", "123")
+	ctx.Set("number", 456)
+
+	if param := ctx.Param("id"); param != "123" {
+		t.Errorf("Expected string param '123', got %s", param)
+	}
+
+	if param := ctx.Param("number"); param != "" {
+		t.Errorf("Expected empty string for non-string param, got %s", param)
+	}
+
+	if param := ctx.Param("missing"); param != "" {
+		t.Errorf("Expected empty string for missing param, got %s", param)
+	}
+}
+
+func TestHTTPContextQueryAll(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test?param1=value1&param2=value2&param1=value3", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	queryAll := ctx.QueryAll()
+
+	if len(queryAll["param1"]) != 2 {
+		t.Error("Expected param1 to have 2 values")
+	}
+
+	if queryAll["param1"][0] != "value1" || queryAll["param1"][1] != "value3" {
+		t.Error("param1 values not correct")
+	}
+
+	if len(queryAll["param2"]) != 1 || queryAll["param2"][0] != "value2" {
+		t.Error("param2 value not correct")
+	}
+}
+
+func TestHTTPContextStartTime(t *testing.T) {
+	t.Parallel()
+
+	start := time.Now()
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	if ctx.StartTime().Before(start) {
+		t.Error("Start time should be after test start")
+	}
+
+	if time.Since(ctx.StartTime()) > time.Second {
+		t.Error("Start time should be recent")
+	}
+}
+
+func TestHTTPContextSetContext(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+	originalRequestID := ctx.RequestID()
+
+	newCtx := context.WithValue(context.Background(), customKey, "custom_value")
+	ctx.SetContext(newCtx)
+
+	if ctx.Context().Value(customKey) != "custom_value" {
+		t.Error("Custom context value not set")
+	}
+
+	if ctx.RequestID() != originalRequestID {
+		t.Error("Request ID should be preserved when setting context")
+	}
+}
+
+func TestHTTPContextDataResponse(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	data := []byte("binary data")
+	if err := ctx.Data(appOctetStream, data); err != nil {
+		t.Fatalf("Data response failed: %v", err)
+	}
+
+	if w.Code != 200 {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	if contentType := w.Header().Get("Content-Type"); contentType != appOctetStream {
+		t.Errorf("Expected Content-Type application/octet-stream, got %s", contentType)
+	}
+
+	if !strings.Contains(w.Body.String(), "binary data") {
+		t.Error("Response body not correct")
+	}
+}
+
+func TestHTTPContextResponseAlreadySent(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	if err := ctx.JSON(map[string]string{"first": "response"}); err != nil {
+		t.Fatalf("First response failed: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"String", func() error { return ctx.String("test") }},
+		{"Data", func() error { return ctx.Data("text/plain", []byte("test")) }},
+		{"Redirect", func() error { return ctx.Redirect(302, "/") }},
+		{"NoContent", func() error { return ctx.NoContent() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.fn(); !errors.Is(err, ErrResponseAlreadySent) {
+				t.Errorf("Expected ErrResponseAlreadySent for %s, got %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestHTTPContextJSONMarshalError(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	invalidData := make(chan int)
+	err := ctx.JSON(invalidData)
+
+	if err == nil {
+		t.Error("Expected JSON marshal error for channel type")
+	}
+}
+
+func TestHTTPContextFileUpload(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+	upload := ctx.FileUpload()
+
+	if upload == nil {
+		t.Error("FileUpload should not return nil")
+	}
+}
+
+func TestHTTPContextStreaming(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+	stream := ctx.Streaming()
+
+	if stream == nil {
+		t.Error("Streaming should not return nil")
+	}
+}
+
+func TestHTTPContextWebsocket(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+	ws := ctx.Websocket()
+
+	if ws == nil {
+		t.Error("Websocket should not return nil")
+	}
+}
+
+func TestHTTPContextBodyReadError(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("POST", "/test", &errorReader{})
+	w := httptest.NewRecorder()
+	logger := &mockLogger{}
+
+	ctx := NewHTTPContext(w, req, logger)
+
+	_, err := ctx.Body()
+	if err == nil {
+		t.Error("Expected error reading body")
+	}
+}
+
+type errorReader struct{}
+
+func (e *errorReader) Read(_ []byte) (n int, err error) {
+	return 0, errors.New("read error")
 }

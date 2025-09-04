@@ -157,18 +157,29 @@ func (r *httpRouter) Static(path, root string) {
 }
 
 func (r *httpRouter) StaticFile(path, fPath string) {
-	if !isPathSafe("", fPath) {
-		r.logger.Critical("StaticFile: unsafe file path " + fPath)
+	absPath, err := filepath.Abs(filepath.Clean(fPath))
+	if err != nil {
+		r.logger.Critical("StaticFile: failed to resolve absolute path", "path", fPath)
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		r.logger.Critical("StaticFile: file not found", "path", absPath)
+		return
+	}
+	if info.IsDir() {
+		r.logger.Critical("StaticFile: path is a directory, not a file", "path", absPath)
 		return
 	}
 
 	r.GET(path, func(ctx contracts.HTTPContext) error {
 		data, err := os.ReadFile(filepath.Clean(fPath))
 		if err != nil {
-			return ErrFileNotFound.WithDetail("path", fPath).WithCause(err)
+			return ErrFileNotFound.WithDetail("path", absPath).WithCause(err)
 		}
 
-		contentType := mime.TypeByExtension(filepath.Ext(fPath))
+		contentType := mime.TypeByExtension(filepath.Ext(absPath))
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
@@ -299,6 +310,11 @@ func (r *httpRouter) matchPattern(pattern, path string) map[string]string {
 }
 
 func isPathSafe(root, path string) bool {
+	for i := 0; i < len(path); i++ {
+		if path[i] == 0 {
+			return false
+		}
+	}
 	if filepath.IsAbs(path) {
 		return false
 	}

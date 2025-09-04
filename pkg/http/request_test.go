@@ -38,14 +38,14 @@ func TestHTTPRequestHeaders(t *testing.T) {
 	req := NewHTTPRequest("GET", "http://example.com", nil).(*httpRequest)
 	req.SetHeader("Authorization", "Bearer token")
 	req.AddHeader("Accept", "application/json")
-	req.AddHeader("Accept", "text/plain")
+	req.AddHeader("Accept", textPlain)
 
 	headers := req.Headers()
 	if auth := headers["Authorization"]; len(auth) == 0 || auth[0] != "Bearer token" {
 		t.Error("Authorization header not set correctly")
 	}
 
-	if accept := headers["Accept"]; len(accept) != 2 || accept[0] != "application/json" || accept[1] != "text/plain" {
+	if accept := headers["Accept"]; len(accept) != 2 || accept[0] != "application/json" || accept[1] != textPlain {
 		t.Error("Accept headers not added correctly")
 	}
 }
