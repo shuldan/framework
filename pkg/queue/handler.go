@@ -16,6 +16,12 @@ type ErrorHandler interface {
 
 type defaultPanicHandler struct{ logger contracts.Logger }
 
+func NewDefaultPanicHandler(logger contracts.Logger) PanicHandler {
+	return &defaultPanicHandler{
+		logger: logger,
+	}
+}
+
 func (d *defaultPanicHandler) Handle(job any, consumer any, panicValue any, stack []byte) {
 	if d.logger == nil {
 		slog.Error(
@@ -35,6 +41,12 @@ func (d *defaultPanicHandler) Handle(job any, consumer any, panicValue any, stac
 }
 
 type defaultErrorHandler struct{ logger contracts.Logger }
+
+func NewDefaultErrorHandler(logger contracts.Logger) ErrorHandler {
+	return &defaultErrorHandler{
+		logger: logger,
+	}
+}
 
 func (d *defaultErrorHandler) Handle(job any, consumer any, err error) {
 	if d.logger == nil {
