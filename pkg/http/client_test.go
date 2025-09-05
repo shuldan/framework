@@ -422,6 +422,7 @@ func TestClientProcessResponseError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "10")
+		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte("short")); err != nil {
 			t.Logf("Failed to write response: %v", err)
@@ -430,7 +431,7 @@ func TestClientProcessResponseError(t *testing.T) {
 	defer server.Close()
 
 	logger := &mockLogger{}
-	client := NewClientWithConfig(logger, ClientConfig{MaxRetries: 0})
+	client := NewClientWithConfig(logger, ClientConfig{MaxRetries: 0, Timeout: 1 * time.Second})
 
 	_, err := client.Get(context.Background(), server.URL)
 	if err != nil {

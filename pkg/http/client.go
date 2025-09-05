@@ -108,9 +108,20 @@ func (c *httpClient) Patch(ctx context.Context, url string, body interface{}, op
 
 func (c *httpClient) Do(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	if c.config.MaxRetries == 0 {
-		return c.doSingleRequest(ctx, req)
+		response, err := c.doSingleRequest(ctx, req)
+		if err != nil {
+			return nil, ErrHTTPRequest.WithCause(err)
+		}
+		return response, nil
 	}
-	return c.doWithRetry(ctx, req)
+	response, err := c.doWithRetry(ctx, req)
+	if err != nil {
+		return nil, ErrHTTPRequest.WithCause(err)
+	}
+	if response == nil {
+		return nil, ErrHTTPRequest.WithDetail("reason", "max retries exceeded")
+	}
+	return response, nil
 }
 
 func (c *httpClient) doWithRetry(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
@@ -131,17 +142,17 @@ func (c *httpClient) doWithRetry(ctx context.Context, req contracts.HTTPRequest)
 		}
 		return resp, nil
 	}
-	return nil, c.wrapRetryError(lastErr)
+	return nil, lastErr
 }
 
 func (c *httpClient) doSingleRequest(ctx context.Context, req contracts.HTTPRequest) (contracts.HTTPResponse, error) {
 	httpReq, err := c.buildHTTPRequest(ctx, req)
 	if err != nil {
-		return nil, ErrHTTPRequest.WithCause(err)
+		return nil, err
 	}
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, ErrHTTPRequest.WithCause(err)
+		return nil, err
 	}
 	return c.processResponse(resp, req)
 }
@@ -168,7 +179,7 @@ func (c *httpClient) processResponse(resp *http.Response, req contracts.HTTPRequ
 	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, ErrHTTPRequest.WithCause(err)
+		return nil, err
 	}
 	return &httpResponse{
 		statusCode: resp.StatusCode,
@@ -226,11 +237,4 @@ func (c *httpClient) generateSecureJitter(waitTime time.Duration) time.Duration 
 		randomInt64 = -randomInt64
 	}
 	return time.Duration(randomInt64 % maxJitterInt)
-}
-
-func (c *httpClient) wrapRetryError(lastErr error) error {
-	if lastErr != nil {
-		return ErrHTTPRequest.WithCause(lastErr)
-	}
-	return ErrHTTPRequest.WithDetail("reason", "max retries exceeded")
 }

@@ -392,6 +392,7 @@ func TestWebsocketConnectionWriteAfterClose(t *testing.T) {
 		}
 	}()
 
+	_ = clientConn.Close()
 	if err := wsConn.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
@@ -409,8 +410,6 @@ func TestWebsocketConnectionWriteAfterClose(t *testing.T) {
 	if err := wsConn.Ping(ctx); !errors.Is(err, ErrWebsocketClosed) {
 		t.Errorf("Expected ErrWebsocketClosed for ping, got %v", err)
 	}
-
-	_ = clientConn.Close()
 }
 
 func TestWebsocketConnectionLargePayload(t *testing.T) {
