@@ -13,4 +13,5 @@ var (
 	ErrHelpCommandNotFound    = newConsoleCode().New("help command not found for {{.command}}")
 	ErrInvalidConsoleInstance = newConsoleCode().New("cli not implemented Console interface")
 	ErrFlagParse              = newConsoleCode().New("flag parsing failed for command {{.command}}")
+	ErrFailedRegisterCommand  = newConsoleCode().New("failed to register command from module {{.module}}")
 )

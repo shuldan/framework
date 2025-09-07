@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -9,9 +10,9 @@ func TestHTTPRequest(t *testing.T) {
 	t.Parallel()
 
 	testData := map[string]string{"key": "value"}
-	req := NewHTTPRequest("POST", "http://example.com", testData)
+	req := NewHTTPRequest(http.MethodPost, "http://example.com", testData)
 
-	if req.Method() != "POST" {
+	if req.Method() != http.MethodPost {
 		t.Errorf("Expected method POST, got %s", req.Method())
 	}
 	if req.URL() != "http://example.com" {

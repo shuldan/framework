@@ -8,9 +8,9 @@ type ErrorHandler interface {
 	Handle(event any, listener any, err error)
 }
 
-type Option func(*config)
+type Option func(*eventBusConfig)
 
-type config struct {
+type eventBusConfig struct {
 	panicHandler PanicHandler
 	errorHandler ErrorHandler
 	asyncMode    bool
@@ -18,25 +18,25 @@ type config struct {
 }
 
 func WithPanicHandler(h PanicHandler) Option {
-	return func(c *config) {
+	return func(c *eventBusConfig) {
 		c.panicHandler = h
 	}
 }
 
 func WithErrorHandler(h ErrorHandler) Option {
-	return func(c *config) {
+	return func(c *eventBusConfig) {
 		c.errorHandler = h
 	}
 }
 
 func WithAsyncMode(async bool) Option {
-	return func(c *config) {
+	return func(c *eventBusConfig) {
 		c.asyncMode = async
 	}
 }
 
 func WithWorkerCount(count int) Option {
-	return func(c *config) {
+	return func(c *eventBusConfig) {
 		if count < 1 {
 			count = 1
 		}

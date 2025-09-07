@@ -1,13 +1,21 @@
 package config
 
 import (
-	"fmt"
-
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type module struct {
 	loader Loader
+}
+
+func NewModule(envPrefix string, configPaths ...string) contracts.AppModule {
+	loaders := []Loader{
+		NewYamlConfigLoader(configPaths...),
+		NewJSONConfigLoader(configPaths...),
+		NewEnvConfigLoader(envPrefix),
+	}
+
+	return &module{loader: newTemplatedLoader(NewChainLoader(loaders...))}
 }
 
 func (m *module) Name() string {
@@ -18,7 +26,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(contracts.ConfigModuleName, func(c contracts.DIContainer) (interface{}, error) {
 		values, err := m.loader.Load()
 		if err != nil {
-			return nil, fmt.Errorf("failed to Load config: %w", err)
+			return nil, err
 		}
 		return NewMapConfig(values), nil
 	})

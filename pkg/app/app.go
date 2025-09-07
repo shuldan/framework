@@ -15,14 +15,14 @@ import (
 type app struct {
 	container       contracts.DIContainer
 	registry        contracts.AppRegistry
-	info            AppInfo
+	info            Info
 	appCtx          *appContext
 	appCtxMu        sync.RWMutex
 	isRunning       int32
 	shutdownTimeout time.Duration
 }
 
-func New(info AppInfo, container contracts.DIContainer, registry contracts.AppRegistry, opts ...func(*app)) contracts.App {
+func New(info Info, container contracts.DIContainer, registry contracts.AppRegistry, opts ...func(*app)) contracts.App {
 	if container == nil {
 		container = NewContainer()
 	}
@@ -72,7 +72,7 @@ func (a *app) Run() error {
 		return ErrAppRun.WithDetail("reason", "application is already isRunning")
 	}
 
-	ctx := newAppContext(a.info, a.container)
+	ctx := newAppContext(a.info, a.container, a.registry)
 	a.setAppCtx(ctx)
 
 	for _, module := range a.registry.All() {

@@ -10,10 +10,14 @@ type defaultPanicHandler struct {
 	logger contracts.Logger
 }
 
+func NewDefaultPanicHandler(logger contracts.Logger) PanicHandler {
+	return &defaultPanicHandler{logger: logger}
+}
+
 func (d *defaultPanicHandler) Handle(event any, listener any, panicValue any, stack []byte) {
 	if d.logger == nil {
 		slog.Error(
-			"event bus panic",
+			"event eventBus panic",
 			"event", event,
 			"listener", listener,
 			"panic_value", panicValue,
@@ -21,7 +25,7 @@ func (d *defaultPanicHandler) Handle(event any, listener any, panicValue any, st
 		)
 		return
 	}
-	d.logger.Critical("event bus panic",
+	d.logger.Critical("event eventBus panic",
 		"event", event,
 		"listener", listener,
 		"panic_value", panicValue,
@@ -33,17 +37,21 @@ type defaultErrorHandler struct {
 	logger contracts.Logger
 }
 
+func NewDefaultErrorHandler(logger contracts.Logger) ErrorHandler {
+	return &defaultErrorHandler{logger: logger}
+}
+
 func (d *defaultErrorHandler) Handle(event any, listener any, err error) {
 	if d.logger == nil {
 		slog.Error(
-			"event bus error",
+			"event eventBus error",
 			"event", event,
 			"listener", listener,
 			"error", err,
 		)
 		return
 	}
-	d.logger.Error("event bus error",
+	d.logger.Error("event eventBus error",
 		"event", event,
 		"listener", listener,
 		"error", err,

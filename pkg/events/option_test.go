@@ -6,7 +6,7 @@ func TestWithPanicHandler(t *testing.T) {
 	t.Parallel()
 
 	handler := &mockPanicHandler{}
-	cfg := &config{}
+	cfg := &eventBusConfig{}
 
 	opt := WithPanicHandler(handler)
 	opt(cfg)
@@ -20,7 +20,7 @@ func TestWithErrorHandler(t *testing.T) {
 	t.Parallel()
 
 	handler := &mockErrorHandler{}
-	cfg := &config{}
+	cfg := &eventBusConfig{}
 
 	opt := WithErrorHandler(handler)
 	opt(cfg)
@@ -43,7 +43,7 @@ func TestWithAsyncMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config{}
+			cfg := &eventBusConfig{}
 			opt := WithAsyncMode(tt.value)
 			opt(cfg)
 
@@ -70,7 +70,7 @@ func TestWithWorkerCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config{}
+			cfg := &eventBusConfig{}
 			opt := WithWorkerCount(tt.input)
 			opt(cfg)
 

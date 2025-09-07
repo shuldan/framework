@@ -484,7 +484,12 @@ func TestWebsocketConnectionDoubleClose(t *testing.T) {
 
 func TestHSTSMiddlewareImport(t *testing.T) {
 	t.Parallel()
-	middleware := HSTSMiddleware(time.Hour, false)
+	middleware := HSTSMiddleware(hstsConfig{
+		enabled:           true,
+		maxAge:            time.Hour,
+		includeSubdomains: false,
+		preload:           true,
+	})
 	if middleware == nil {
 		t.Error("HSTSMiddleware should not return nil")
 	}

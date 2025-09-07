@@ -20,6 +20,10 @@ type simpleAppContext struct {
 	ctx context.Context
 }
 
+func (s *simpleAppContext) AppRegistry() contracts.AppRegistry {
+	return nil
+}
+
 func (s *simpleAppContext) Ctx() context.Context {
 	if s.ctx == nil {
 		return context.Background()

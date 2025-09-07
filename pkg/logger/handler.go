@@ -16,18 +16,20 @@ type textHandler struct {
 	groups      []string
 	isColored   bool
 	replaceAttr func(groups []string, a slog.Attr) slog.Attr
+	level       slog.Level
 }
 
-func newTextHandler(writer io.Writer, isColored bool, replaceAttr func(groups []string, a slog.Attr) slog.Attr) slog.Handler {
+func newTextHandler(writer io.Writer, isColored bool, replaceAttr func(groups []string, a slog.Attr) slog.Attr, level slog.Level) slog.Handler {
 	return &textHandler{
 		writer:      writer,
 		isColored:   isColored,
 		replaceAttr: replaceAttr,
+		level:       level,
 	}
 }
 
-func (h *textHandler) Enabled(context.Context, slog.Level) bool {
-	return true
+func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level
 }
 
 func (h *textHandler) Handle(_ context.Context, r slog.Record) error {

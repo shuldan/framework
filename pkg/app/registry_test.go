@@ -40,7 +40,7 @@ func TestRegistry_ShutdownWithError(t *testing.T) {
 
 	_ = reg.Register(mod1)
 
-	ctx := newAppContext(AppInfo{}, NewContainer())
+	ctx := newAppContext(Info{}, NewContainer(), nil)
 
 	err := reg.Shutdown(ctx)
 	if err == nil {

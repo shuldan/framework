@@ -1,7 +1,13 @@
 package config
 
+import "github.com/shuldan/framework/pkg/errors"
+
 type chainLoader struct {
 	loaders []Loader
+}
+
+func NewChainLoader(loaders ...Loader) Loader {
+	return &chainLoader{loaders: loaders}
 }
 
 func (c *chainLoader) Load() (map[string]any, error) {
@@ -11,6 +17,9 @@ func (c *chainLoader) Load() (map[string]any, error) {
 	for _, loader := range c.loaders {
 		config, err := loader.Load()
 		if err != nil {
+			if errors.Is(err, ErrNoConfigSource) {
+				continue
+			}
 			lastErr = err
 			continue
 		}
@@ -22,7 +31,10 @@ func (c *chainLoader) Load() (map[string]any, error) {
 	}
 
 	if len(final) == 0 {
-		return nil, ErrNoConfigSource.WithCause(lastErr)
+		if lastErr != nil {
+			return nil, ErrNoConfigSource.WithDetail("loader", "chain").WithCause(lastErr)
+		}
+		return nil, ErrNoConfigSource.WithDetail("loader", "chain")
 	}
 
 	return final, nil

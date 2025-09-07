@@ -10,6 +10,7 @@ const (
 	EventBusModuleName   = "event.bus"
 	LoggerModuleName     = "logger"
 	ConfigModuleName     = "config"
+	DatabaseModuleName   = "database"
 	HTTPClientModuleName = "http.client"
 	HTTPServerModuleName = "http.server"
 	HTTPRouterModuleName = "http.router"
@@ -32,6 +33,7 @@ type AppContext interface {
 	StopTime() time.Time
 	IsRunning() bool
 	Stop()
+	AppRegistry() AppRegistry
 }
 
 type AppModule interface {

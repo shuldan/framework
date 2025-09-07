@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -13,6 +14,38 @@ var oddArgsWarning sync.Once
 
 type sLogger struct {
 	*slog.Logger
+}
+
+func NewLogger(opts ...Option) (contracts.Logger, error) {
+	cfg := &config{
+		level:     slog.LevelInfo,
+		json:      false,
+		addSource: false,
+		writer:    os.Stdout,
+	}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.replaceAttr == nil {
+		WithDefaultReplaceAttr()(cfg)
+	}
+
+	var handler slog.Handler
+	if cfg.json {
+		handlerOpts := &slog.HandlerOptions{
+			Level:       cfg.level,
+			AddSource:   cfg.addSource,
+			ReplaceAttr: cfg.replaceAttr,
+		}
+		handler = slog.NewJSONHandler(cfg.writer, handlerOpts)
+	} else {
+		isColored := cfg.wantColor && isTerminal(cfg.writer)
+		handler = newTextHandler(cfg.writer, isColored, cfg.replaceAttr, cfg.level)
+	}
+
+	return &sLogger{Logger: slog.New(handler)}, nil
 }
 
 func (l *sLogger) Trace(msg string, args ...any) {

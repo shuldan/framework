@@ -8,6 +8,12 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+var _ Loader = (*YamlConfigLoader)(nil)
+
+func NewYamlConfigLoader(paths ...string) Loader {
+	return &YamlConfigLoader{paths: paths}
+}
+
 type YamlConfigLoader struct {
 	paths []string
 }
@@ -15,6 +21,7 @@ type YamlConfigLoader struct {
 func (l *YamlConfigLoader) Load() (map[string]any, error) {
 	for _, path := range l.paths {
 		absPath, err := filepath.Abs(path)
+
 		if err != nil {
 			continue
 		}
@@ -54,5 +61,5 @@ func (l *YamlConfigLoader) Load() (map[string]any, error) {
 		return config, nil
 	}
 
-	return nil, ErrNoConfigSource
+	return nil, ErrNoConfigSource.WithDetail("loader", "yaml")
 }

@@ -31,3 +31,7 @@ type Cli interface {
 	Register(cmd CliCommand) error
 	Run(ctx CliContext) error
 }
+
+type CliCommandProvider interface {
+	CliCommands(ctx AppContext) ([]CliCommand, error)
+}

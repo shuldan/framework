@@ -430,7 +430,15 @@ func TestCheckOriginInvalidURL(t *testing.T) {
 func TestSecurityMiddleware(t *testing.T) {
 	t.Parallel()
 
-	middleware := SecurityMiddleware()
+	middleware := SecurityHeadersMiddleware(
+		securityHeadersConfig{
+			enabled:        true,
+			csp:            "default-src 'self'; script-src 'self' 'unsafe-inline';",
+			xFrameOptions:  "DENY",
+			xXSSProtection: "1; mode=block",
+			referrerPolicy: "strict-origin-when-cross-origin",
+		},
+	)
 	handler := func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "ok"})
 	}
@@ -446,11 +454,12 @@ func TestSecurityMiddleware(t *testing.T) {
 	}
 
 	expectedHeaders := map[string]string{
-		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":        "DENY",
-		"X-XSS-Protection":       "1; mode=block",
-		"Referrer-Policy":        "strict-origin-when-cross-origin",
-		"Server":                 "",
+		"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline';",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"X-XSS-Protection":        "1; mode=block",
+		"Referrer-Policy":         "strict-origin-when-cross-origin",
+		"Server":                  "",
 	}
 
 	for header, expected := range expectedHeaders {
@@ -467,7 +476,14 @@ func TestSecurityMiddleware(t *testing.T) {
 func TestHSTSMiddleware(t *testing.T) {
 	t.Parallel()
 
-	middleware := HSTSMiddleware(31536000*time.Second, true)
+	middleware := HSTSMiddleware(
+		hstsConfig{
+			enabled:           true,
+			maxAge:            31536000 * time.Second,
+			includeSubdomains: true,
+			preload:           true,
+		},
+	)
 	handler := func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "ok"})
 	}
@@ -498,7 +514,14 @@ func TestHSTSMiddleware(t *testing.T) {
 func TestHSTSMiddlewareNoTLS(t *testing.T) {
 	t.Parallel()
 
-	middleware := HSTSMiddleware(31536000*time.Second, true)
+	middleware := HSTSMiddleware(
+		hstsConfig{
+			enabled:           true,
+			maxAge:            31536000 * time.Second,
+			includeSubdomains: true,
+			preload:           true,
+		},
+	)
 	handler := func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "ok"})
 	}

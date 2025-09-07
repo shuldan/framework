@@ -534,7 +534,7 @@ func TestEventBus_AsyncContextCancellation(t *testing.T) {
 	}
 }
 
-func setupBlockedChannelBus() (*bus, *sync.Mutex, func() (context.Context, context.CancelFunc)) {
+func setupBlockedChannelBus() (*eventBus, *sync.Mutex, func() (context.Context, context.CancelFunc)) {
 	b := New(
 		WithAsyncMode(true),
 		WithWorkerCount(1),
@@ -555,10 +555,10 @@ func setupBlockedChannelBus() (*bus, *sync.Mutex, func() (context.Context, conte
 		return context.WithTimeout(context.Background(), 50*time.Millisecond)
 	}
 
-	return b.(*bus), &blockingMu, ctxFunc
+	return b.(*eventBus), &blockingMu, ctxFunc
 }
 
-func publishEventsAndCollectErrors(b *bus, ctx context.Context, count int) <-chan error {
+func publishEventsAndCollectErrors(b *eventBus, ctx context.Context, count int) <-chan error {
 	publishErrors := make(chan error, count)
 	var publishWg sync.WaitGroup
 

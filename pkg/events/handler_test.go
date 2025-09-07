@@ -69,8 +69,8 @@ func TestDefaultPanicHandler_WithLogger(t *testing.T) {
 		t.Errorf("expected critical level, got %s", entry.level)
 	}
 
-	if entry.msg != "event bus panic" {
-		t.Errorf("expected 'event bus panic', got %s", entry.msg)
+	if entry.msg != "event eventBus panic" {
+		t.Errorf("expected 'event eventBus panic', got %s", entry.msg)
 	}
 }
 
@@ -108,8 +108,8 @@ func TestDefaultErrorHandler_WithLogger(t *testing.T) {
 		t.Errorf("expected error level, got %s", entry.level)
 	}
 
-	if entry.msg != "event bus error" {
-		t.Errorf("expected 'event bus error', got %s", entry.msg)
+	if entry.msg != "event eventBus error" {
+		t.Errorf("expected 'event eventBus error', got %s", entry.msg)
 	}
 }
 

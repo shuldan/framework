@@ -179,3 +179,14 @@ type HTTPWebsocketMessage struct {
 	Data  []byte
 	Error error
 }
+
+type HTTPRouteRegistration struct {
+	Method     string
+	Path       string
+	Handler    HTTPHandler
+	Middleware []HTTPMiddleware
+}
+
+type HTTPRouteProvider interface {
+	HTTPRoutes(ctx AppContext) ([]HTTPRouteRegistration, error)
+}

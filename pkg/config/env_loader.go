@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+var _ Loader = (*envConfigLoader)(nil)
+
+func NewEnvConfigLoader(prefix string) Loader {
+	return &envConfigLoader{prefix: prefix}
+}
+
 type envConfigLoader struct {
 	prefix string
 }

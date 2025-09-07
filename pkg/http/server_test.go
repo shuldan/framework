@@ -18,7 +18,7 @@ func TestServer(t *testing.T) {
 	router.GET("/health", func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "healthy"})
 	})
-	server, err := NewServer(":0", router, logger)
+	server, err := NewServer(router, logger, WithAddress(":8081"))
 	if err != nil {
 		t.Errorf("NewServer should not return an error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestServerAlreadyRunning(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer("", router, logger)
+	server, err := NewServer(router, logger, WithAddress(":0"))
 	if err != nil {
 		t.Errorf("NewServer should not return an error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestServerAlreadyRunning(t *testing.T) {
 
 func TestServerPanicOnNilDependencies(t *testing.T) {
 	t.Parallel()
-	_, err := NewServer("", nil, &mockLogger{})
+	_, err := NewServer(nil, &mockLogger{})
 	if err == nil {
 		t.Errorf("Expected error for nil router")
 	}
@@ -134,7 +134,7 @@ func TestServerNilDependencies(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewServer(tt.addr, tt.router, tt.logger)
+			_, err := NewServer(tt.router, tt.logger)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewServer() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -148,7 +148,7 @@ func TestServerDefaultAddress(t *testing.T) {
 	logger := &mockLogger{}
 	router := NewRouter(logger)
 
-	server, err := NewServer("", router, logger)
+	server, err := NewServer(router, logger)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestServerStopBeforeStart(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer(":0", router, logger)
+	server, err := NewServer(router, logger)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestServerHandler(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer(":0", router, logger)
+	server, err := NewServer(router, logger)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestServerStartTimeout(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer(":0", router, logger)
+	server, err := NewServer(router, logger, WithAddress(":0"))
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestServerConcurrentStartStop(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer(":0", router, logger)
+	server, err := NewServer(router, logger, WithAddress(":0"))
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestServerInvalidAddress(t *testing.T) {
 
 	logger := &mockLogger{}
 	router := NewRouter(logger)
-	server, err := NewServer("invalid-address", router, logger)
+	server, err := NewServer(router, logger, WithAddress("invalid-address"))
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}

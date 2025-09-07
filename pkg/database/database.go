@@ -8,7 +8,7 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type DatabaseConfig struct {
+type dbDonfig struct {
 	maxOpenConns    int
 	maxIdleConns    int
 	connMaxLifetime time.Duration
@@ -18,30 +18,30 @@ type DatabaseConfig struct {
 	retryDelay      time.Duration
 }
 
-type DatabaseOption func(*DatabaseConfig)
+type Option func(*dbDonfig)
 
-func WithConnectionPool(maxOpen, maxIdle int, maxLifetime time.Duration) DatabaseOption {
-	return func(config *DatabaseConfig) {
+func WithConnectionPool(maxOpen, maxIdle int, maxLifetime time.Duration) Option {
+	return func(config *dbDonfig) {
 		config.maxOpenConns = maxOpen
 		config.maxIdleConns = maxIdle
 		config.connMaxLifetime = maxLifetime
 	}
 }
 
-func WithConnectionIdleTime(idleTime time.Duration) DatabaseOption {
-	return func(config *DatabaseConfig) {
+func WithConnectionIdleTime(idleTime time.Duration) Option {
+	return func(config *dbDonfig) {
 		config.connMaxIdleTime = idleTime
 	}
 }
 
-func WithPingTimeout(timeout time.Duration) DatabaseOption {
-	return func(config *DatabaseConfig) {
+func WithPingTimeout(timeout time.Duration) Option {
+	return func(config *dbDonfig) {
 		config.pingTimeout = timeout
 	}
 }
 
-func WithRetry(attempts int, delay time.Duration) DatabaseOption {
-	return func(config *DatabaseConfig) {
+func WithRetry(attempts int, delay time.Duration) Option {
+	return func(config *dbDonfig) {
 		config.retryAttempts = attempts
 		config.retryDelay = delay
 	}
@@ -53,11 +53,11 @@ type sqlDatabase struct {
 	dsn             string
 	migrationRunner contracts.MigrationRunner
 	migrations      []contracts.Migration
-	config          DatabaseConfig
+	config          dbDonfig
 }
 
-func NewDatabase(driver, dsn string, options ...DatabaseOption) contracts.Database {
-	config := DatabaseConfig{
+func NewDatabase(driver, dsn string, options ...Option) contracts.Database {
+	config := dbDonfig{
 		maxOpenConns:    25,
 		maxIdleConns:    5,
 		connMaxLifetime: time.Hour,

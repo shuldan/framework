@@ -1,6 +1,7 @@
 package http
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -73,8 +74,8 @@ func TestRouterNotFound(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	if w.Code != 500 {
-		t.Errorf("Expected status 500, got %d", w.Code)
+	if w.Code != 404 {
+		t.Errorf("Expected status 404, got %d", w.Code)
 	}
 }
 
@@ -216,8 +217,8 @@ func TestRouterMethodNotAllowed(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	if w.Code != 500 {
-		t.Errorf("Expected status 500, got %d", w.Code)
+	if w.Code != 405 {
+		t.Errorf("Expected status 405, got %d", w.Code)
 	}
 }
 
@@ -265,17 +266,17 @@ func TestRouterHTTPMethods(t *testing.T) {
 		}
 
 		switch method {
-		case "POST":
+		case http.MethodPost:
 			router.POST("/test", handler)
-		case "PUT":
+		case http.MethodPut:
 			router.PUT("/test", handler)
-		case "DELETE":
+		case http.MethodDelete:
 			router.DELETE("/test", handler)
-		case "PATCH":
+		case http.MethodPatch:
 			router.PATCH("/test", handler)
-		case "HEAD":
+		case http.MethodHead:
 			router.HEAD("/test", handler)
-		case "OPTIONS":
+		case http.MethodOptions:
 			router.OPTIONS("/test", handler)
 		}
 

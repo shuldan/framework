@@ -20,7 +20,7 @@ func TestNew_WithOptions(t *testing.T) {
 	)
 
 	if bus == nil {
-		t.Fatal("expected non-nil bus")
+		t.Fatal("expected non-nil eventBus")
 	}
 
 	err := bus.Close()
@@ -35,7 +35,7 @@ func TestNew_DefaultHandlers(t *testing.T) {
 	bus := New()
 
 	if bus == nil {
-		t.Fatal("expected non-nil bus")
+		t.Fatal("expected non-nil eventBus")
 	}
 
 	err := bus.Close()

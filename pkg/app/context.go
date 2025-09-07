@@ -8,34 +8,36 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type AppInfo struct {
+type Info struct {
 	AppName     string
 	Version     string
 	Environment string
 }
 
 type appContext struct {
-	ctx       context.Context
-	container contracts.DIContainer
-	cancel    context.CancelFunc
-	info      AppInfo
-	startTime time.Time
-	stopTime  time.Time
-	mu        sync.RWMutex
-	isRunning bool
+	ctx         context.Context
+	container   contracts.DIContainer
+	cancel      context.CancelFunc
+	info        Info
+	startTime   time.Time
+	stopTime    time.Time
+	mu          sync.RWMutex
+	isRunning   bool
+	appRegistry contracts.AppRegistry
 }
 
-func newAppContext(info AppInfo, container contracts.DIContainer) *appContext {
+func newAppContext(info Info, container contracts.DIContainer, appRegistry contracts.AppRegistry) *appContext {
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now()
 	return &appContext{
-		ctx:       ctx,
-		container: container,
-		cancel:    cancel,
-		info:      info,
-		startTime: now,
-		stopTime:  time.Time{},
-		isRunning: true,
+		ctx:         ctx,
+		container:   container,
+		cancel:      cancel,
+		info:        info,
+		startTime:   now,
+		stopTime:    time.Time{},
+		isRunning:   true,
+		appRegistry: appRegistry,
 	}
 }
 
@@ -95,4 +97,8 @@ func (c *appContext) Stop() {
 		c.stopTime = time.Now()
 		c.isRunning = false
 	}
+}
+
+func (c *appContext) AppRegistry() contracts.AppRegistry {
+	return c.appRegistry
 }

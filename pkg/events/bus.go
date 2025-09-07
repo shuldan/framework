@@ -115,7 +115,7 @@ type eventTask struct {
 	adapter *listenerAdapter
 }
 
-type bus struct {
+type eventBus struct {
 	mu           sync.RWMutex
 	listeners    map[reflect.Type][]*listenerAdapter
 	closed       bool
@@ -127,17 +127,49 @@ type bus struct {
 	asyncMode    bool
 }
 
-func (b *bus) WithPanicHandler(h PanicHandler) contracts.Bus {
+func New(opts ...Option) contracts.EventBus {
+	cfg := &eventBusConfig{
+		asyncMode:   false,
+		workerCount: 1,
+	}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.panicHandler == nil {
+		cfg.panicHandler = NewDefaultPanicHandler(nil)
+	}
+	if cfg.errorHandler == nil {
+		cfg.errorHandler = NewDefaultErrorHandler(nil)
+	}
+
+	b := &eventBus{
+		listeners:    make(map[reflect.Type][]*listenerAdapter),
+		panicHandler: cfg.panicHandler,
+		errorHandler: cfg.errorHandler,
+		asyncMode:    cfg.asyncMode,
+		workerCount:  cfg.workerCount,
+	}
+
+	if cfg.asyncMode {
+		b.startWorkers()
+	}
+
+	return b
+}
+
+func (b *eventBus) WithPanicHandler(h PanicHandler) contracts.EventBus {
 	b.panicHandler = h
 	return b
 }
 
-func (b *bus) WithErrorHandler(h ErrorHandler) contracts.Bus {
+func (b *eventBus) WithErrorHandler(h ErrorHandler) contracts.EventBus {
 	b.errorHandler = h
 	return b
 }
 
-func (b *bus) Subscribe(eventTypeArg any, listener any) error {
+func (b *eventBus) Subscribe(eventTypeArg any, listener any) error {
 	eventTypeOf := reflect.TypeOf(eventTypeArg)
 	if eventTypeOf == nil {
 		return ErrInvalidEventType.WithDetail("reason", "eventType is nil")
@@ -169,7 +201,7 @@ func (b *bus) Subscribe(eventTypeArg any, listener any) error {
 	return nil
 }
 
-func (b *bus) Publish(ctx context.Context, event any) error {
+func (b *eventBus) Publish(ctx context.Context, event any) error {
 	if event == nil {
 		return nil
 	}
@@ -212,7 +244,7 @@ func (b *bus) Publish(ctx context.Context, event any) error {
 	return nil
 }
 
-func (b *bus) Close() error {
+func (b *eventBus) Close() error {
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -229,7 +261,7 @@ func (b *bus) Close() error {
 	return nil
 }
 
-func (b *bus) startWorkers() {
+func (b *eventBus) startWorkers() {
 	b.eventChan = make(chan eventTask, b.workerCount*10)
 	for i := 0; i < b.workerCount; i++ {
 		b.wg.Add(1)
@@ -237,14 +269,14 @@ func (b *bus) startWorkers() {
 	}
 }
 
-func (b *bus) worker() {
+func (b *eventBus) worker() {
 	defer b.wg.Done()
 	for task := range b.eventChan {
 		b.processEvent(task)
 	}
 }
 
-func (b *bus) processEvent(task eventTask) {
+func (b *eventBus) processEvent(task eventTask) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.panicHandler.Handle(task.event, task.adapter, r, debug.Stack())
@@ -256,7 +288,7 @@ func (b *bus) processEvent(task eventTask) {
 	}
 }
 
-func (b *bus) processEventSync(ctx context.Context, event any, adapter *listenerAdapter) error {
+func (b *eventBus) processEventSync(ctx context.Context, event any, adapter *listenerAdapter) error {
 	defer func() {
 		if r := recover(); r != nil {
 			b.panicHandler.Handle(event, adapter, r, debug.Stack())

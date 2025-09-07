@@ -68,3 +68,41 @@ func WithUserAgent(userAgent string) contracts.HTTPRequestOption {
 		}
 	}
 }
+
+type ServerOption func(*serverConfig)
+
+func WithAddress(address string) ServerOption {
+	return func(c *serverConfig) {
+		c.address = address
+	}
+}
+
+func WithReadHeaderTimeout(timeout time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.readHeaderTimeout = timeout
+	}
+}
+
+func WithReadTimeout(timeout time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.readTimeout = timeout
+	}
+}
+
+func WithWriteTimeout(timeout time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.writeTimeout = timeout
+	}
+}
+
+func WithIdleTimeout(timeout time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.idleTimeout = timeout
+	}
+}
+
+func WithShutdownTimeout(timeout time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.shutdownTimeout = timeout
+	}
+}

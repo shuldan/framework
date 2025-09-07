@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/shuldan/framework/pkg/queue"
 )
 
 type broker struct {
@@ -19,6 +21,19 @@ type broker struct {
 	consumersMu sync.RWMutex
 	config      *config
 	wg          sync.WaitGroup
+}
+
+func New(client *redis.Client, opts ...Option) queue.Broker {
+	c := defaultConfig()
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return &broker{
+		client:    client,
+		consumers: make(map[string][]context.CancelFunc),
+		config:    c,
+	}
 }
 
 func (b *broker) Produce(ctx context.Context, topic string, data []byte) error {

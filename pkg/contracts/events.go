@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-type Bus interface {
+type EventBus interface {
 	Subscribe(eventType any, listener any) error
 	Publish(ctx context.Context, event any) error
 	Close() error

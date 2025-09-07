@@ -66,6 +66,8 @@ func (m *mockApplicationContext) Stop() {
 	m.running = false
 }
 
+func (m *mockApplicationContext) AppRegistry() contracts.AppRegistry { return nil }
+
 type testCommand struct {
 	name        string
 	description string
@@ -334,6 +336,10 @@ type mockAppContextWithCancel struct {
 	ctx       context.Context
 	container contracts.DIContainer
 	stopped   bool
+}
+
+func (m *mockAppContextWithCancel) AppRegistry() contracts.AppRegistry {
+	return nil
 }
 
 func (m *mockAppContextWithCancel) Ctx() context.Context {

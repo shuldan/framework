@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+var _ Loader = (*jsonConfigLoader)(nil)
+
+func NewJSONConfigLoader(paths ...string) Loader {
+	return &jsonConfigLoader{paths: paths}
+}
+
 type jsonConfigLoader struct {
 	paths []string
 }
@@ -57,7 +63,7 @@ func (l *jsonConfigLoader) Load() (map[string]any, error) {
 		return config, nil
 	}
 
-	return nil, ErrNoConfigSource
+	return nil, ErrNoConfigSource.WithDetail("loader", "json")
 }
 
 func fileExists(path string) bool {

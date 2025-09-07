@@ -13,6 +13,10 @@ type MapConfig struct {
 	values map[string]any
 }
 
+func NewMapConfig(values map[string]any) contracts.Config {
+	return &MapConfig{values: values}
+}
+
 var _ contracts.Config = (*MapConfig)(nil)
 
 func (c *MapConfig) Has(key string) bool {

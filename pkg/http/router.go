@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/shuldan/framework/pkg/contracts"
+	"github.com/shuldan/framework/pkg/errors"
 )
 
 type httpRoute struct {
@@ -36,12 +37,16 @@ func NewRouter(logger contracts.Logger) contracts.HTTPRouter {
 	}
 
 	r.notFoundHandler = func(ctx contracts.HTTPContext) error {
-		return ErrRouteNotFound.
-			WithDetail("method", ctx.Method()).
-			WithDetail("path", ctx.Path())
+		ctx.Status(http.StatusNotFound)
+		return errors.ErrNotFound.WithCause(
+			ErrRouteNotFound.
+				WithDetail("method", ctx.Method()).
+				WithDetail("path", ctx.Path()),
+		)
 	}
 
 	r.methodNotAllowedHandler = func(ctx contracts.HTTPContext) error {
+		ctx.Status(http.StatusMethodNotAllowed)
 		return ErrMethodNotAllowed.
 			WithDetail("method", ctx.Method()).
 			WithDetail("path", ctx.Path())
@@ -50,10 +55,9 @@ func NewRouter(logger contracts.Logger) contracts.HTTPRouter {
 	r.errorHandler = func(ctx contracts.HTTPContext, err error) {
 		if ctx.StatusCode() == 0 {
 			ctx.Status(http.StatusInternalServerError)
-		}
-
-		if r.logger != nil {
-			r.logger.Error("HTTP handler error", "error", err, "path", ctx.Path(), "method", ctx.Method())
+			if r.logger != nil {
+				r.logger.Error("HTTP handler error", "error", err, "path", ctx.Path(), "method", ctx.Method())
+			}
 		}
 
 		if err = ctx.JSON(map[string]string{"error": err.Error()}); err != nil && r.logger != nil {

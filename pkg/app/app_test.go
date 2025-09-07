@@ -9,7 +9,7 @@ import (
 )
 
 func TestApplication_Run_Success(t *testing.T) {
-	a := New(AppInfo{
+	a := New(Info{
 		AppName: "test",
 	}, nil, nil)
 
@@ -44,7 +44,7 @@ func TestApplication_Run_Success(t *testing.T) {
 
 func TestApplication_GracefulTimeout(t *testing.T) {
 	a := New(
-		AppInfo{AppName: "timeout"},
+		Info{AppName: "timeout"},
 		nil,
 		nil,
 		WithGracefulTimeout(100*time.Millisecond),
@@ -82,7 +82,7 @@ func TestApplication_GracefulTimeout(t *testing.T) {
 }
 
 func TestApplication_RegisterError(t *testing.T) {
-	a := New(AppInfo{}, nil, nil)
+	a := New(Info{}, nil, nil)
 
 	_ = a.(*app).registry.Register(&mockModule{
 		name: "error",
@@ -98,7 +98,7 @@ func TestApplication_RegisterError(t *testing.T) {
 }
 
 func TestApplication_DoubleRun(t *testing.T) {
-	a := New(AppInfo{AppName: "test"}, nil, nil)
+	a := New(Info{AppName: "test"}, nil, nil)
 
 	done := make(chan error, 1)
 	go func() {
@@ -129,26 +129,26 @@ func TestApplication_DoubleRun(t *testing.T) {
 }
 
 func TestApplication_NewWithNilDependencies(t *testing.T) {
-	a := New(AppInfo{AppName: "test"}, nil, nil)
+	a := New(Info{AppName: "test"}, nil, nil)
 	if a == nil {
 		t.Fatal("New should not return nil")
 	}
 
 	registry := NewRegistry()
-	a = New(AppInfo{AppName: "test"}, nil, registry)
+	a = New(Info{AppName: "test"}, nil, registry)
 	if a == nil {
 		t.Fatal("New should not return nil with nil container")
 	}
 
 	container := NewContainer()
-	a = New(AppInfo{AppName: "test"}, container, nil)
+	a = New(Info{AppName: "test"}, container, nil)
 	if a == nil {
 		t.Fatal("New should not return nil with nil registry")
 	}
 }
 
 func TestApplication_WithGracefulTimeout(t *testing.T) {
-	a := New(AppInfo{AppName: "test"}, nil, nil)
+	a := New(Info{AppName: "test"}, nil, nil)
 	appImpl := a.(*app)
 
 	if appImpl.shutdownTimeout != 10*time.Second {
@@ -156,7 +156,7 @@ func TestApplication_WithGracefulTimeout(t *testing.T) {
 	}
 
 	customTimeout := 5 * time.Second
-	a = New(AppInfo{AppName: "test"}, nil, nil, WithGracefulTimeout(customTimeout))
+	a = New(Info{AppName: "test"}, nil, nil, WithGracefulTimeout(customTimeout))
 	appImpl = a.(*app)
 
 	if appImpl.shutdownTimeout != customTimeout {
@@ -165,7 +165,7 @@ func TestApplication_WithGracefulTimeout(t *testing.T) {
 }
 
 func TestApplication_RegisterAfterRun(t *testing.T) {
-	a := New(AppInfo{AppName: "test"}, nil, nil)
+	a := New(Info{AppName: "test"}, nil, nil)
 
 	done := make(chan error, 1)
 	go func() {
@@ -190,7 +190,7 @@ func TestApplication_RegisterAfterRun(t *testing.T) {
 }
 
 func TestApplication_StartError_ShutdownPreviouslyStarted(t *testing.T) {
-	a := New(AppInfo{AppName: "test"}, nil, nil)
+	a := New(Info{AppName: "test"}, nil, nil)
 
 	successModule := &mockModule{name: "success"}
 

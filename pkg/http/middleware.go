@@ -3,14 +3,128 @@ package http
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
+
+func LoadMiddlewareFromConfig(config contracts.Config, logger contracts.Logger) []contracts.HTTPMiddleware {
+	var middlewares []contracts.HTTPMiddleware
+
+	if sub, ok := config.GetSub("http.middleware"); ok {
+		if m := loadSecurityHeadersMiddleware(sub); m != nil {
+			middlewares = append(middlewares, m)
+		}
+		if m := loadHSTSMiddleware(sub); m != nil {
+			middlewares = append(middlewares, m)
+		}
+		if m := loadCORSMiddleware(sub); m != nil {
+			middlewares = append(middlewares, m)
+		}
+		if m := loadLoggingMiddleware(sub, logger); m != nil {
+			middlewares = append(middlewares, m)
+		}
+		if m := loadErrorHandlerMiddleware(sub, logger); m != nil {
+			middlewares = append(middlewares, m)
+		}
+	}
+
+	return middlewares
+}
+
+func loadSecurityHeadersMiddleware(sub contracts.Config) contracts.HTTPMiddleware {
+	if secSub, ok := sub.GetSub("security_headers"); ok && secSub.GetBool("enabled", true) {
+		cfg := securityHeadersConfig{
+			enabled:        true,
+			csp:            secSub.GetString("csp", "default-src 'self';"),
+			xFrameOptions:  secSub.GetString("x_frame_options", "DENY"),
+			xXSSProtection: secSub.GetString("x_xss_protection", "1; mode=block"),
+			referrerPolicy: secSub.GetString("referrer_policy", "strict-origin-when-cross-origin"),
+		}
+		return SecurityHeadersMiddleware(cfg)
+	}
+	return nil
+}
+
+func loadHSTSMiddleware(sub contracts.Config) contracts.HTTPMiddleware {
+	if hstsSub, ok := sub.GetSub("hsts"); ok && hstsSub.GetBool("enabled", false) {
+		maxAge := time.Duration(hstsSub.GetInt("max_age", 31536000)) * time.Second
+		cfg := hstsConfig{
+			enabled:           true,
+			maxAge:            maxAge,
+			includeSubdomains: hstsSub.GetBool("include_subdomains", false),
+			preload:           hstsSub.GetBool("preload", false),
+		}
+		return HSTSMiddleware(cfg)
+	}
+	return nil
+}
+
+func loadCORSMiddleware(sub contracts.Config) contracts.HTTPMiddleware {
+	if corsSub, ok := sub.GetSub("cors"); ok && corsSub.GetBool("enabled", false) {
+		cfg := CORSConfig{
+			AllowOrigins:     corsSub.GetStringSlice("allow_origins"),
+			AllowMethods:     corsSub.GetStringSlice("allow_methods"),
+			AllowHeaders:     corsSub.GetStringSlice("allow_headers"),
+			AllowCredentials: corsSub.GetBool("allow_credentials", false),
+			MaxAge:           time.Duration(corsSub.GetInt("max_age", 86400)) * time.Second,
+		}
+		if len(cfg.AllowMethods) == 0 {
+			cfg.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"}
+		}
+		if len(cfg.AllowHeaders) == 0 {
+			cfg.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Requested-With"}
+		}
+		return CORSMiddleware(cfg)
+	}
+	return nil
+}
+
+func loadLoggingMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
+	if logSub, ok := sub.GetSub("logging"); ok && logSub.GetBool("enabled", false) {
+		return LoggingMiddleware(logger)
+	}
+	return nil
+}
+
+func loadErrorHandlerMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
+	if errSub, ok := sub.GetSub("error_handler"); ok && errSub.GetBool("enabled", false) {
+		cfg := &ErrorHandlerConfig{
+			showStackTrace: errSub.GetBool("show_stack_trace", false),
+			showDetails:    errSub.GetBool("show_details", false),
+			logLevel:       errSub.GetString("log_level", "error"),
+		}
+
+		if statusSub, ok := errSub.GetSub("status_codes"); ok {
+			statusMap := make(map[string]int)
+			for code, val := range statusSub.All() {
+				if statusCode, ok := val.(int); ok {
+					statusMap[code] = statusCode
+				}
+			}
+			cfg.statusCodeMap = statusMap
+		}
+
+		if msgSub, ok := errSub.GetSub("user_messages"); ok {
+			msgMap := make(map[string]string)
+			for code, msg := range msgSub.All() {
+				if message, ok := msg.(string); ok {
+					msgMap[code] = message
+				}
+			}
+			cfg.userMessageMap = msgMap
+		}
+
+		return ErrorHandlerMiddleware(NewErrorHandler(cfg, logger))
+	}
+	return nil
+}
 
 func LoggingMiddleware(logger contracts.Logger) contracts.HTTPMiddleware {
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
@@ -112,6 +226,7 @@ func ErrorHandlerMiddleware(errorHandler contracts.ErrorHandler) contracts.HTTPM
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			if err := next(ctx); err != nil {
+				log.Println("middleware error handler")
 				_ = errorHandler.Handle(ctx.Context(), err)
 			}
 			return nil
@@ -205,31 +320,55 @@ func checkOrigin(config CORSConfig, origin string) (string, bool) {
 	}
 }
 
-func SecurityMiddleware() contracts.HTTPMiddleware {
+type securityHeadersConfig struct {
+	enabled        bool
+	csp            string
+	xFrameOptions  string
+	xXSSProtection string
+	referrerPolicy string
+}
+
+func SecurityHeadersMiddleware(config securityHeadersConfig) contracts.HTTPMiddleware {
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			ctx.SetHeader("X-Content-Type-Options", "nosniff")
-			ctx.SetHeader("X-Frame-Options", "DENY")
-			ctx.SetHeader("X-XSS-Protection", "1; mode=block")
-			ctx.SetHeader("Referrer-Policy", "strict-origin-when-cross-origin")
-			ctx.SetHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'")
-			ctx.SetHeader("httpServer", "")
+			if config.xFrameOptions != "" {
+				ctx.SetHeader("X-Frame-Options", config.xFrameOptions)
+			}
+			if config.xXSSProtection != "" {
+				ctx.SetHeader("X-XSS-Protection", config.xXSSProtection)
+			}
+			if config.referrerPolicy != "" {
+				ctx.SetHeader("Referrer-Policy", config.referrerPolicy)
+			}
+			if config.csp != "" {
+				ctx.SetHeader("Content-Security-Policy", config.csp)
+			}
+			ctx.SetHeader("Server", "")
 			return next(ctx)
 		}
 	}
 }
 
-func HSTSMiddleware(maxAge time.Duration, includeSubdomains bool) contracts.HTTPMiddleware {
+type hstsConfig struct {
+	enabled           bool
+	maxAge            time.Duration
+	includeSubdomains bool
+	preload           bool
+}
+
+func HSTSMiddleware(config hstsConfig) contracts.HTTPMiddleware {
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
-			if ctx.Request().TLS != nil {
-				hstsValue := fmt.Sprintf("max-age=%d", int64(maxAge.Seconds()))
-				if includeSubdomains {
-					hstsValue += "; includeSubDomains"
+			if ctx.Request().TLS != nil && config.enabled {
+				value := "max-age=" + strconv.FormatInt(int64(config.maxAge.Seconds()), 10)
+				if config.includeSubdomains {
+					value += "; includeSubDomains"
 				}
-				hstsValue += "; preload"
-
-				ctx.SetHeader("Strict-Transport-Security", hstsValue)
+				if config.preload {
+					value += "; preload"
+				}
+				ctx.SetHeader("Strict-Transport-Security", value)
 			}
 			return next(ctx)
 		}

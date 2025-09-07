@@ -15,6 +15,10 @@ type helpAppContext struct {
 	stopped bool
 }
 
+func (h *helpAppContext) AppRegistry() contracts.AppRegistry {
+	return nil
+}
+
 func (h *helpAppContext) Ctx() context.Context {
 	return context.Background()
 }

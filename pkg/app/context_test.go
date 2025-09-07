@@ -5,7 +5,7 @@ import (
 )
 
 func TestAppContext_Stop(t *testing.T) {
-	ctx := newAppContext(AppInfo{AppName: "test"}, NewContainer())
+	ctx := newAppContext(Info{AppName: "test"}, NewContainer(), nil)
 
 	if !ctx.IsRunning() {
 		t.Error("Context should be isRunning after creation")

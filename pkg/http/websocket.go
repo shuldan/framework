@@ -92,7 +92,7 @@ func (w *httpWebsocketContext) Upgrade() (contracts.HTTPWebsocketConnection, err
 	return NewWebsocketConnection(conn, bufrw, w.logger), nil
 }
 
-func (w *httpWebsocketContext) isOriginAllowed(origin string) bool {
+func (w *httpWebsocketContext) isOriginAllowed(_ string) bool {
 	return true
 }
 
