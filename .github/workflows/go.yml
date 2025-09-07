@@ -134,32 +134,22 @@ jobs:
           import (
               "log"
               "time"
-              "github.com/shuldan/framework/pkg/app"
-              "github.com/shuldan/framework/pkg/cli"
-              "github.com/shuldan/framework/pkg/logger"
+              "github.com/shuldan/framework/pkg/bootstrap"
           )
           
           func main() {
-              application := app.New(
-                  app.AppInfo{
-                      AppName:     "example",
-                      Version:     "1.0.0", 
-                      Environment: "development",
-                  },
-                  nil,
-                  nil,
-                  app.WithGracefulTimeout(time.Second),
-              )
-          
-              if err := application.Register(logger.NewModule()); err != nil {
-                  log.Fatal(err)
-              }
-          
-              if err := application.Register(cli.NewModule()); err != nil {
-                  log.Fatal(err)
-              }
-          
-              log.Println("Example compiled successfully")
+            boot := bootstrap.New("test", "test", "TEST").
+              WithLogger().
+              WithCli()
+            
+            application, err := boot.CreateApp()
+            if err != nil {
+              log.Fatalf("Application initialization failed: %v", err)
+            }
+  
+            if err := application.Run(); err != nil {
+              log.Println(err)
+            }
           }
           EOF
           go mod tidy
