@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -17,7 +16,7 @@ import (
 func LoadMiddlewareFromConfig(config contracts.Config, logger contracts.Logger) []contracts.HTTPMiddleware {
 	var middlewares []contracts.HTTPMiddleware
 
-	if sub, ok := config.GetSub("http.middleware"); ok {
+	if sub, ok := config.GetSub("http.server.middleware"); ok {
 		if m := loadSecurityHeadersMiddleware(sub); m != nil {
 			middlewares = append(middlewares, m)
 		}
@@ -226,8 +225,7 @@ func ErrorHandlerMiddleware(errorHandler contracts.ErrorHandler) contracts.HTTPM
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			if err := next(ctx); err != nil {
-				log.Println("middleware error handler")
-				_ = errorHandler.Handle(ctx.Context(), err)
+				_ = errorHandler.Handle(context.WithValue(ctx.Context(), ContextKey, ctx), err)
 			}
 			return nil
 		}

@@ -17,30 +17,30 @@ package main
 
 import (
     "log"
-    "github.com/shuldan/framework/pkg/app"
-    "github.com/shuldan/framework/pkg/logger"
+	"github.com/shuldan/framework/pkg/bootstrap"
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 func main() {
-    application := app.New(
-        app.AppInfo{
-            AppName:     "MyApp",
-            Version:     "1.0.0",
-            Environment: "development",
-        },
-        nil,
-        nil,
-        app.WithGracefulTimeout(10*time.Second),
-    )
+	boot := bootstrap.New("test", "dev", "TEST")
+	boot.WithLogger()
+	boot.WithHTTPServer()
+	boot.WithCli()
 
-    if err := application.Register(logger.NewModule()); err != nil {
-        log.Fatal(err)
-    }
+	application, err := boot.CreateApp()
+	if err != nil {
+		log.Fatalf("Application initialization failed: %v", err)
+	}
 
-    if err := application.Run(); err != nil {
-        log.Fatal(err)
-    }
+	if err := application.Run(); err != nil {
+		log.Fatalf("Application run failed: %v", err)
+	}
 }
+```
+
+Запуск:
+```bash
+go run main.go http:serve
 ```
 
 ---
@@ -192,8 +192,8 @@ graph TD
 
 #### 💡 Пример:
 ```go
-application := app.New(app.AppInfo{...}, nil, nil, app.WithGracefulTimeout(10*time.Second))
-application.Register(logger.NewModule())
+application, _ := boot.CreateApp()
+application.Register(NewMyModule())
 application.Run()
 ```
 
@@ -238,6 +238,18 @@ scopedLog := log.With("service", "auth")
 scopedLog.Error("Auth failed", "error", err)
 ```
 
+#### ⚙️ Конфигурация:
+```yaml
+logger:
+  level: "error"
+  format: "json"
+  output: "stdout"
+  base_dir: "./logs"
+  file_path: "./app.log"
+  enable_colors: false
+  include_caller: false
+```
+
 ---
 
 ### 4. **HTTP — Модуль HTTP-сервера**
@@ -257,6 +269,107 @@ ctx.Websocket().Upgrade()
 ctx.Streaming().WriteStringChunk("Hello")
 ```
 
+#### ⚙️ Конфигурация:
+```yaml
+http:
+  server:
+    address: "localhost:8080"
+    shutdown_timeout: 30
+    read_timeout: 5
+    write_timeout: 10
+    max_body_size: 4194304  # 4 MB
+    middleware:
+      security_headers:
+        enabled: true
+        csp: "default-src 'self'; script-src 'self' 'unsafe-inline';"
+        x_frame_options: "DENY"
+        x_xss_protection: "1; mode=block"
+        referrer_policy: "strict-origin-when-cross-origin"
+      hsts:
+        enabled: true
+        max_age: 31536000
+        include_subdomains: true
+        preload: true
+      cors:
+        enabled: true
+        allow_origins:
+          - "https://example.com"
+          - "http://localhost:3000"
+        allow_methods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+          - "OPTIONS"
+        allow_headers:
+          - "Origin"
+          - "Content-Type"
+          - "Authorization"
+        allow_credentials: true
+        max_age: 86400
+      logging:
+        enabled: true
+      error_handler:
+        enabled: false
+        show_stack_trace: false
+        show_details: false
+        log_level: "warn"
+        status_codes:
+          "ERR_VALIDATION": 400
+          "ERR_AUTH": 401
+          "ERR_FORBIDDEN": 403
+          "ERR_NOT_FOUND": 404
+          "ERR_INTERNAL": 500
+          "ERR_TIMEOUT": 408
+          "ERR_UNPROCESSABLE": 422
+          "ERR_UNAVAILABLE": 503
+        user_messages:
+          "ERR_INTERNAL": "Internal server error. Please try again later."
+          "ERR_TIMEOUT": "Request timed out. Please try again."
+          "ERR_UNAVAILABLE": "Service temporarily unavailable."
+          "ERR_VALIDATION": "One or more validation errors occurred."
+          "ERR_AUTH": "Authentication required."
+          "ERR_FORBIDDEN": "You don't have permission to access this resource."
+          "ERR_NOT_FOUND": "The requested resource was not found."
+          "ERR_UNPROCESSABLE": "The request was well-formed but was unable to be followed due to semantic errors."
+  client:
+    timeout: 30
+    max_retries: 3
+    retry_wait_min: 100
+    retry_wait_max: 1000
+    backoff_strategy: "exponential"
+    disable_keep_alives: false
+    max_idle_connections: 100
+    idle_conn_timeout: 90
+  websocket:
+    enabled: false
+    check_origin: true
+    allowed_origins:
+      - "https://example.com"
+      - "http://localhost:3000"
+    subprotocols:
+      - "chat"
+      - "echo"
+    read_buffer_size: 4096
+    write_buffer_size: 4096
+    ping_interval: 60
+    pong_timeout: 10
+    max_message_size: 524288
+    compression: false
+  static:
+    enabled: true
+    mappings:
+      - path: "/assets"
+        root: "./public"
+        index_file: "index.html"
+        cache_control: "public, max-age=3600"
+        browse: false
+      - path: "/uploads"
+        root: "./storage/uploads"
+        cache_control: "private, max-age=0"
+        browse: false
+```
+
 ---
 
 ### 5. **Events — Событийная шина**
@@ -270,6 +383,14 @@ bus.Subscribe(ctx, func(ctx context.Context, e UserCreatedEvent) error {
     log.Info("User created", "id", e.ID)
     return nil
 })
+```
+
+
+#### ⚙️ Конфигурация:
+```yaml
+events:
+  async_mode: true
+  worker_count: 5
 ```
 
 ---
@@ -307,6 +428,29 @@ queue.Produce(ctx, "emails", &SendEmailJob{To: "user@example.com", Subject: "Hel
 user := TestUser{ID: NewUUID(), Name: "Alice"}
 repo.Save(ctx, user)
 found, err := repo.Find(ctx, user.ID)
+```
+
+#### ⚙️ Конфигурация:
+```yaml
+database:
+  default: "primary"
+  connections:
+    primary:
+      driver: "sqlite3"
+      dsn: ":memory:"
+      options:
+        max_open_conns: 10
+        max_idle_conns: 5
+        conn_max_lifetime: 3600
+        conn_max_idle_time: 1800
+        ping_timeout: 15
+        retry_attempts: 3
+        retry_delay: 200
+  migrations:
+    enabled: true
+    table: "schema_migrations"
+    path: "./migrations"
+  auto_migrate: true
 ```
 
 ---

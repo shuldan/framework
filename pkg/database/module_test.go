@@ -40,7 +40,7 @@ func TestModule_Register(t *testing.T) {
 
 	err := container.Instance(contracts.ConfigModuleName, cfg)
 	if err != nil {
-		t.Fatalf("failed to register dbDonfig: %v", err)
+		t.Fatalf("failed to register dbConfig: %v", err)
 	}
 
 	m := NewModule()
@@ -49,14 +49,18 @@ func TestModule_Register(t *testing.T) {
 		t.Fatalf("failed to register module: %v", err)
 	}
 
-	if !container.Has("database") {
+	if !container.Has(contracts.DatabaseModuleName + ".primary") {
+		t.Error("database should be registered")
+	}
+
+	if !container.Has(contracts.DatabaseModuleName + ".connections.primary") {
 		t.Error("database should be registered")
 	}
 }
 
 func TestModule_CreateConnection(t *testing.T) {
 	m := &Module{
-		connections: make(map[string]contracts.Database),
+		pool: newDatabasePool(),
 	}
 
 	tests := []struct {

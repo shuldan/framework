@@ -38,7 +38,7 @@ func TestApplication_Run_Success(t *testing.T) {
 
 	err := <-done
 	if err != nil {
-		t.Errorf("Run() returned error: %v", err)
+		t.Errorf("Migrate() returned error: %v", err)
 	}
 }
 
@@ -115,12 +115,12 @@ func TestApplication_DoubleRun(t *testing.T) {
 
 	err := <-done
 	if err != nil && !errors.Is(err, ErrAppRun) {
-		t.Fatalf("First Run() failed with unexpected error: %v", err)
+		t.Fatalf("First Migrate() failed with unexpected error: %v", err)
 	}
 
 	err = a.Run()
 	if err == nil {
-		t.Fatal("Second Run() should fail")
+		t.Fatal("Second Migrate() should fail")
 	}
 
 	if !errors.Is(err, ErrAppRun) {
@@ -177,7 +177,7 @@ func TestApplication_RegisterAfterRun(t *testing.T) {
 	mockMod := &mockModule{name: "late"}
 	err := a.Register(mockMod)
 	if err != nil {
-		t.Errorf("Register should work even after Run started: %v", err)
+		t.Errorf("Register should work even after Migrate started: %v", err)
 	}
 
 	appImpl := a.(*app)

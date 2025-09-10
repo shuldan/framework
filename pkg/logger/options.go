@@ -82,12 +82,21 @@ func WithColor() Option {
 }
 
 func WithDefaultReplaceAttr() Option {
-	return WithReplaceAttr(func(groups []string, a slog.Attr) slog.Attr {
-		if a.Key == slog.LevelKey {
-			if level, ok := a.Value.Any().(slog.Level); ok {
-				return slog.String(slog.LevelKey, getLevelName(level))
+	return func(c *config) {
+		prev := c.replaceAttr
+		c.replaceAttr = func(groups []string, a slog.Attr) slog.Attr {
+			if prev != nil {
+				a = prev(groups, a)
+				if a.Equal(slog.Attr{}) {
+					return a
+				}
 			}
+			if a.Key == slog.LevelKey {
+				if level, ok := a.Value.Any().(slog.Level); ok {
+					return slog.String(slog.LevelKey, getLevelName(level))
+				}
+			}
+			return a
 		}
-		return a
-	})
+	}
 }

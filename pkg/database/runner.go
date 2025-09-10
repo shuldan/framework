@@ -14,7 +14,7 @@ type sqlMigrationRunner struct {
 	db *sql.DB
 }
 
-func NewMigrationRunner(db *sql.DB) contracts.MigrationRunner {
+func newMigrationRunner(db *sql.DB) MigrationRunner {
 	return &sqlMigrationRunner{db: db}
 }
 
@@ -45,7 +45,7 @@ func (r *sqlMigrationRunner) CreateMigrationTable() error {
 	return nil
 }
 
-func (r *sqlMigrationRunner) Run(migrations []contracts.Migration) error {
+func (r *sqlMigrationRunner) Migrate(migrations []contracts.Migration) error {
 	ctx := context.Background()
 
 	if err := r.CreateMigrationTable(); err != nil {

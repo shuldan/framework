@@ -206,7 +206,7 @@ func registerServer(container contracts.DIContainer) error {
 
 	if config, err := container.Resolve(contracts.ConfigModuleName); err == nil {
 		if cfg, ok := config.(contracts.Config); ok {
-			if httpCfg, ok := cfg.GetSub("http"); ok {
+			if httpCfg, ok := cfg.GetSub("http.server"); ok {
 				options = append(options,
 					WithAddress(httpCfg.GetString("address", ":8080")),
 					WithReadHeaderTimeout(time.Duration(httpCfg.GetInt("read_header_timeout", 30))*time.Second),

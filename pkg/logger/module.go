@@ -1,7 +1,11 @@
 package logger
 
 import (
+	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +26,10 @@ func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
 		contracts.LoggerModuleName,
 		func(c contracts.DIContainer) (interface{}, error) {
-			options := m.getLoggerOptions(c)
+			options, err := m.getLoggerOptions(c)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get logger options: %w", err)
+			}
 			return NewLogger(options...)
 		},
 	)
@@ -53,13 +60,17 @@ func (m *module) Stop(ctx contracts.AppContext) error {
 	return nil
 }
 
-func (m *module) getLoggerOptions(c contracts.DIContainer) []Option {
+func (m *module) getLoggerOptions(c contracts.DIContainer) ([]Option, error) {
 	var options []Option
 
 	if configInst, err := c.Resolve(contracts.ConfigModuleName); err == nil {
 		if cfg, ok := configInst.(contracts.Config); ok {
 			if loggerCfg, ok := cfg.GetSub("logger"); ok {
-				options = append(options, m.optionsFromFileConfig(loggerCfg)...)
+				opts, err := m.optionsFromFileConfig(loggerCfg)
+				if err != nil {
+					return nil, err
+				}
+				options = append(options, opts...)
 			}
 		}
 	}
@@ -73,10 +84,10 @@ func (m *module) getLoggerOptions(c contracts.DIContainer) []Option {
 		)
 	}
 
-	return options
+	return options, nil
 }
 
-func (m *module) optionsFromFileConfig(cfg contracts.Config) []Option {
+func (m *module) optionsFromFileConfig(cfg contracts.Config) ([]Option, error) {
 	var options []Option
 
 	levelStr := cfg.GetString("level", "info")
@@ -90,17 +101,26 @@ func (m *module) optionsFromFileConfig(cfg contracts.Config) []Option {
 		options = append(options, WithText())
 	}
 
-	if cfg.GetBool("add_source", false) {
+	output := cfg.GetString("output", "stdout")
+
+	writer, err := m.getWriter(output, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create writer: %w", err)
+	}
+	options = append(options, WithWriter(writer))
+
+	if cfg.GetBool("include_caller", false) {
 		options = append(options, WithSource())
 	}
 
-	if cfg.GetBool("color", true) {
+	enableColors := cfg.GetBool("enable_colors", true)
+	if enableColors && strings.ToLower(format) == "text" {
 		options = append(options, WithColor())
 	}
 
 	options = append(options, WithDefaultReplaceAttr())
 
-	return options
+	return options, nil
 }
 
 func (m *module) parseLevel(level string) slog.Level {
@@ -120,4 +140,36 @@ func (m *module) parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+func (m *module) getWriter(output string, cfg contracts.Config) (io.Writer, error) {
+	switch strings.ToLower(output) {
+	case "stdout":
+		return os.Stdout, nil
+	case "stderr":
+		return os.Stderr, nil
+	case "file":
+		baseDir := cfg.GetString("base_dir", "./logs")
+		filePath := cfg.GetString("file_path", "app.log")
+		return m.createFileWriter(baseDir, filePath)
+	default:
+		return os.Stdout, nil
+	}
+}
+
+func (m *module) createFileWriter(baseDir, filePath string) (io.Writer, error) {
+	absBaseDir, err := filepath.Abs(baseDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve base directory: %w", err)
+	}
+	absPath := filepath.Join(absBaseDir, filePath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0750); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+	file, err := os.OpenFile(filepath.Clean(absPath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	return file, nil
 }

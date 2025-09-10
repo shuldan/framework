@@ -28,10 +28,6 @@ func NewLogger(opts ...Option) (contracts.Logger, error) {
 		opt(cfg)
 	}
 
-	if cfg.replaceAttr == nil {
-		WithDefaultReplaceAttr()(cfg)
-	}
-
 	var handler slog.Handler
 	if cfg.json {
 		handlerOpts := &slog.HandlerOptions{

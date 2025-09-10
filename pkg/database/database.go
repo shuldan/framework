@@ -8,7 +8,7 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type dbDonfig struct {
+type dbConfig struct {
 	maxOpenConns    int
 	maxIdleConns    int
 	connMaxLifetime time.Duration
@@ -18,10 +18,10 @@ type dbDonfig struct {
 	retryDelay      time.Duration
 }
 
-type Option func(*dbDonfig)
+type Option func(*dbConfig)
 
 func WithConnectionPool(maxOpen, maxIdle int, maxLifetime time.Duration) Option {
-	return func(config *dbDonfig) {
+	return func(config *dbConfig) {
 		config.maxOpenConns = maxOpen
 		config.maxIdleConns = maxIdle
 		config.connMaxLifetime = maxLifetime
@@ -29,35 +29,41 @@ func WithConnectionPool(maxOpen, maxIdle int, maxLifetime time.Duration) Option 
 }
 
 func WithConnectionIdleTime(idleTime time.Duration) Option {
-	return func(config *dbDonfig) {
+	return func(config *dbConfig) {
 		config.connMaxIdleTime = idleTime
 	}
 }
 
 func WithPingTimeout(timeout time.Duration) Option {
-	return func(config *dbDonfig) {
+	return func(config *dbConfig) {
 		config.pingTimeout = timeout
 	}
 }
 
 func WithRetry(attempts int, delay time.Duration) Option {
-	return func(config *dbDonfig) {
+	return func(config *dbConfig) {
 		config.retryAttempts = attempts
 		config.retryDelay = delay
 	}
+}
+
+type MigrationRunner interface {
+	Migrate(migrations []contracts.Migration) error
+	Rollback(steps int, migrations []contracts.Migration) error
+	Status() ([]contracts.MigrationStatus, error)
+	CreateMigrationTable() error
 }
 
 type sqlDatabase struct {
 	db              *sql.DB
 	driver          string
 	dsn             string
-	migrationRunner contracts.MigrationRunner
-	migrations      []contracts.Migration
-	config          dbDonfig
+	migrationRunner MigrationRunner
+	config          dbConfig
 }
 
 func NewDatabase(driver, dsn string, options ...Option) contracts.Database {
-	config := dbDonfig{
+	config := dbConfig{
 		maxOpenConns:    25,
 		maxIdleConns:    5,
 		connMaxLifetime: time.Hour,
@@ -100,7 +106,7 @@ func (d *sqlDatabase) Connect() error {
 
 			if err == nil {
 				d.db = db
-				d.migrationRunner = NewMigrationRunner(db)
+				d.migrationRunner = newMigrationRunner(db)
 				return nil
 			}
 		}
@@ -131,13 +137,18 @@ func (d *sqlDatabase) Migrate(migrations []contracts.Migration) error {
 	if d.db == nil {
 		return ErrDatabaseNotConnected
 	}
-
-	d.migrations = migrations
-	return d.migrationRunner.Run(migrations)
+	return d.migrationRunner.Migrate(migrations)
 }
 
-func (d *sqlDatabase) GetMigrationRunner() contracts.MigrationRunner {
-	return d.migrationRunner
+func (d *sqlDatabase) Rollback(steps int, migrations []contracts.Migration) error {
+	if d.db == nil {
+		return ErrDatabaseNotConnected
+	}
+	return d.migrationRunner.Rollback(steps, migrations)
+}
+
+func (d *sqlDatabase) Status() ([]contracts.MigrationStatus, error) {
+	return d.migrationRunner.Status()
 }
 
 func (d *sqlDatabase) BeginTx(ctx context.Context) (contracts.Transaction, error) {

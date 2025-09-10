@@ -3,8 +3,11 @@ package logger
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -300,14 +303,14 @@ func TestModule_OptionsFromFileConfig(t *testing.T) {
 	m := &module{}
 	cfg := &mockConfig{
 		data: map[string]interface{}{
-			"level":      "debug",
-			"format":     "json",
-			"add_source": true,
-			"color":      false,
+			"level":          "debug",
+			"format":         "json",
+			"include_caller": true,
+			"color":          false,
 		},
 	}
 
-	options := m.optionsFromFileConfig(cfg)
+	options, _ := m.optionsFromFileConfig(cfg)
 
 	testCfg := &config{}
 	for _, opt := range options {
@@ -336,7 +339,7 @@ func TestModule_GetLoggerOptions_NoConfig(t *testing.T) {
 		factories: make(map[string]func(container contracts.DIContainer) (interface{}, error)),
 	}
 
-	options := m.getLoggerOptions(container)
+	options, _ := m.getLoggerOptions(container)
 
 	testCfg := &config{}
 	for _, opt := range options {
@@ -348,5 +351,428 @@ func TestModule_GetLoggerOptions_NoConfig(t *testing.T) {
 	}
 	if testCfg.json {
 		t.Error("Default format should be text")
+	}
+}
+
+func TestModule_ConfigurationOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		config         map[string]interface{}
+		validateOutput func(t *testing.T, output string)
+	}{
+		{
+			name: "json_format_with_error_level",
+			config: map[string]interface{}{
+				"level":          "error",
+				"format":         "json",
+				"output":         "stdout",
+				"include_caller": false,
+				"enable_colors":  false,
+			},
+			validateOutput: func(t *testing.T, output string) {
+				if strings.Contains(output, "debug message") {
+					t.Error("Debug messages should be filtered")
+				}
+				if strings.Contains(output, "info message") {
+					t.Error("Info messages should be filtered")
+				}
+				if !strings.Contains(output, "error message") {
+					t.Error("Error message should be logged")
+				}
+				if !strings.Contains(output, `{`) || !strings.Contains(output, `}`) {
+					t.Error("Expected JSON format")
+				}
+				if !strings.Contains(output, `"key":"value"`) {
+					t.Error("Expected key-value in JSON")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			output := captureLoggerOutput(t, tt.config, func(logger contracts.Logger) {
+				logger.Debug("debug message")
+				logger.Info("info message")
+				logger.Error("error message", "key", "value")
+			})
+
+			tt.validateOutput(t, string(output))
+		})
+	}
+}
+
+func TestModule_FileOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join("test", "app.log")
+
+	cfg := &mockConfig{
+		data: map[string]interface{}{
+			"level":     "info",
+			"format":    "text",
+			"output":    "file",
+			"base_dir":  tempDir,
+			"file_path": logFile,
+		},
+	}
+
+	m := &module{}
+	options, err := m.optionsFromFileConfig(cfg)
+	if err != nil {
+		t.Fatalf("Failed to get options: %v", err)
+	}
+
+	logger, err := NewLogger(options...)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+
+	logger.Info("test file logging", "key", "value")
+
+	absLogFile := filepath.Join(tempDir, logFile)
+	if _, err := os.Stat(absLogFile); os.IsNotExist(err) {
+		t.Error("Log file was not created")
+	}
+
+	content, err := os.ReadFile(absLogFile)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	if !strings.Contains(string(content), "test file logging") {
+		t.Error("Log message not found in file")
+	}
+}
+
+func TestModule_ParseLevel_AllLevels(t *testing.T) {
+	m := &module{}
+	tests := []struct {
+		input    string
+		expected slog.Level
+	}{
+		{"trace", levelTrace},
+		{"TRACE", levelTrace},
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"WARN", slog.LevelWarn},
+		{"warning", slog.LevelWarn},
+		{"WARNING", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
+		{"critical", levelCritical},
+		{"CRITICAL", levelCritical},
+		{"fatal", levelCritical},
+		{"FATAL", levelCritical},
+		{"unknown", slog.LevelInfo},
+		{"", slog.LevelInfo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			level := m.parseLevel(tt.input)
+			if level != tt.expected {
+				t.Errorf("parseLevel(%q) = %v, want %v", tt.input, level, tt.expected)
+			}
+		})
+	}
+}
+
+func TestModule_GetWriter(t *testing.T) {
+	m := &module{}
+
+	tests := []struct {
+		name     string
+		output   string
+		expected io.Writer
+	}{
+		{"stdout", "stdout", os.Stdout},
+		{"stderr", "stderr", os.Stderr},
+		{"STDOUT", "STDOUT", os.Stdout},
+		{"unknown", "unknown", os.Stdout},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &mockConfig{data: map[string]interface{}{}}
+			writer, err := m.getWriter(tt.output, cfg)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+			if writer != tt.expected {
+				t.Errorf("Expected %v writer", tt.name)
+			}
+		})
+	}
+}
+
+func TestModule_ColorConfiguration(t *testing.T) {
+	tests := []struct {
+		name         string
+		format       string
+		enableColors bool
+		expectColors bool
+	}{
+		{"text_with_colors", "text", true, true},
+		{"text_without_colors", "text", false, false},
+		{"json_with_colors", "json", true, false},
+		{"json_without_colors", "json", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &mockConfig{
+				data: map[string]interface{}{
+					"format":        tt.format,
+					"enable_colors": tt.enableColors,
+				},
+			}
+
+			m := &module{}
+			options, _ := m.optionsFromFileConfig(cfg)
+
+			config := &config{}
+			for _, opt := range options {
+				opt(config)
+			}
+
+			if tt.expectColors && !config.wantColor {
+				t.Error("Expected colors to be enabled")
+			} else if !tt.expectColors && config.wantColor {
+				t.Error("Expected colors to be disabled")
+			}
+		})
+	}
+}
+
+func (m *mockConfig) GetWriter() io.Writer {
+	if w, ok := m.data["_writer"].(io.Writer); ok {
+		return w
+	}
+	return nil
+}
+
+func TestModule_JSONFormat_WithCaller(t *testing.T) {
+	configData := map[string]interface{}{
+		"level":          "info",
+		"format":         "json",
+		"output":         "stdout",
+		"include_caller": true,
+	}
+	originalStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	var logger contracts.Logger
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cfg := &mockConfig{data: configData}
+		m := &module{}
+		options, err := m.optionsFromFileConfig(cfg)
+		if err != nil {
+			t.Errorf("Failed to get options: %v", err)
+			return
+		}
+		logger, err = NewLogger(options...)
+		if err != nil {
+			t.Errorf("Failed to create logger: %v", err)
+			return
+		}
+		logger.Info("test with caller")
+		_ = w.Close()
+	}()
+
+	buf := &bytes.Buffer{}
+	_, _ = io.Copy(buf, r)
+	os.Stdout = originalStdout
+	<-done
+
+	output := buf.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var logEntry map[string]interface{}
+	if err := json.Unmarshal([]byte(lines[0]), &logEntry); err != nil {
+		t.Fatalf("Output is not valid JSON: %v\nRaw: %q", err, lines[0])
+	}
+
+	if _, ok := logEntry["source"]; !ok {
+		t.Error("Expected 'source' field in JSON output when include_caller=true")
+	}
+	if file, ok := logEntry["source"].(map[string]interface{})["file"]; !ok || file == "" {
+		t.Error("Source file should be present")
+	}
+}
+
+func TestModule_FileOutput_JSONFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join("logs", "app.log")
+
+	configData := map[string]interface{}{
+		"level":     "info",
+		"format":    "json",
+		"output":    "file",
+		"base_dir":  tempDir,
+		"file_path": logFile,
+	}
+
+	m := &module{}
+	cfg := &mockConfig{data: configData}
+	options, err := m.optionsFromFileConfig(cfg)
+	if err != nil {
+		t.Fatalf("Failed to get options: %v", err)
+	}
+
+	logger, err := NewLogger(options...)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+
+	logger.Info("test json to file", "user", "alice", "action", "login")
+
+	absLogFile := filepath.Join(tempDir, logFile)
+	content, err := os.ReadFile(absLogFile)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	if len(content) == 0 {
+		t.Fatal("Log file is empty")
+	}
+
+	var logEntry map[string]interface{}
+	if err := json.Unmarshal(content, &logEntry); err != nil {
+		t.Fatalf("Log file does not contain valid JSON: %v", err)
+	}
+
+	if msg, ok := logEntry["msg"].(string); !ok || msg != "test json to file" {
+		t.Errorf("Expected msg 'test json to file', got %q", msg)
+	}
+	if _, ok := logEntry["user"]; !ok {
+		t.Error("Expected 'user' attribute in JSON")
+	}
+}
+
+func TestModule_InvalidLogLevel_DefaultsToInfo(t *testing.T) {
+	configData := map[string]interface{}{
+		"level": "bogus",
+	}
+
+	m := &module{}
+	cfg := &mockConfig{data: configData}
+	options, err := m.optionsFromFileConfig(cfg)
+	if err != nil {
+		t.Fatalf("Failed to get options: %v", err)
+	}
+
+	testCfg := &config{}
+	for _, opt := range options {
+		opt(testCfg)
+	}
+
+	if testCfg.level != slog.LevelInfo {
+		t.Errorf("Expected default level 'info' for invalid level, got %v", testCfg.level)
+	}
+}
+
+func TestModule_UnicodeSupport_InJSON(t *testing.T) {
+	configData := map[string]interface{}{
+		"level":  "info",
+		"format": "json",
+		"output": "stdout",
+	}
+
+	originalStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	var logger contracts.Logger
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cfg := &mockConfig{data: configData}
+		m := &module{}
+		options, err := m.optionsFromFileConfig(cfg)
+		if err != nil {
+			t.Errorf("Failed to get options: %v", err)
+			return
+		}
+		logger, err = NewLogger(options...)
+		if err != nil {
+			t.Errorf("Failed to create logger: %v", err)
+			return
+		}
+		logger.Info("Привет, мир!", "пользователь", "Иван")
+		_ = w.Close()
+	}()
+
+	buf := &bytes.Buffer{}
+	_, _ = io.Copy(buf, r)
+	os.Stdout = originalStdout
+	<-done
+
+	output := buf.String()
+	var logEntry map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &logEntry); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	if msg, ok := logEntry["msg"].(string); !ok || msg != "Привет, мир!" {
+		t.Errorf("Expected Unicode message, got %q", msg)
+	}
+	if user, ok := logEntry["пользователь"].(string); !ok || user != "Иван" {
+		t.Errorf("Expected Cyrillic key/value, got %q", user)
+	}
+}
+
+func TestModule_ReplaceAttr_DoesNotBreakDefaults(t *testing.T) {
+	configData := map[string]interface{}{
+		"level":  "warn",
+		"format": "text",
+		"output": "stdout",
+	}
+
+	originalStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	var logger contracts.Logger
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cfg := &mockConfig{data: configData}
+		m := &module{}
+		options, err := m.optionsFromFileConfig(cfg)
+		if err != nil {
+			t.Errorf("Failed to get options: %v", err)
+			return
+		}
+		logger, err = NewLogger(options...)
+		if err != nil {
+			t.Errorf("Failed to create logger: %v", err)
+			return
+		}
+		logger.Info("should be filtered")
+		logger.Warn("warning msg")
+		_ = w.Close()
+	}()
+
+	buf := &bytes.Buffer{}
+	_, _ = io.Copy(buf, r)
+	os.Stdout = originalStdout
+	<-done
+
+	output := buf.String()
+
+	if strings.Contains(output, "INFO") || strings.Contains(output, "should be filtered") {
+		t.Error("Info message should be filtered at warn level")
+	}
+	if !strings.Contains(output, "WARN") || !strings.Contains(output, "warning msg") {
+		t.Error("Warn message should be logged")
 	}
 }

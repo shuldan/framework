@@ -5,6 +5,12 @@ import (
 	"io"
 )
 
+const (
+	SystemCliGroup   = "system"
+	DatabaseCliGroup = "database"
+	HttpCliGroup     = "http"
+)
+
 type CliContext interface {
 	Ctx() AppContext
 	Input() io.Reader

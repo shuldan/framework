@@ -3,60 +3,122 @@ package database
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type BaseMigration struct {
-	id          string
-	description string
-	upQueries   []string
-	downQueries []string
+type connectionMigrations struct {
+	mu         sync.RWMutex
+	migrations []contracts.Migration
 }
 
-func NewMigration(id, description string) *BaseMigration {
-	return &BaseMigration{
-		id:          id,
-		description: description,
-		upQueries:   []string{},
-		downQueries: []string{},
+var migrationRegistry = struct {
+	mu   sync.RWMutex
+	data map[string]*connectionMigrations
+}{
+	data: make(map[string]*connectionMigrations),
+}
+
+func registerMigration(m contracts.Migration) {
+	migrationRegistry.mu.Lock()
+	defer migrationRegistry.mu.Unlock()
+
+	if _, exists := migrationRegistry.data[m.ConnectionName()]; !exists {
+		migrationRegistry.data[m.ConnectionName()] = &connectionMigrations{
+			migrations: make([]contracts.Migration, 0),
+		}
 	}
+
+	migrationRegistry.data[m.ConnectionName()].mu.Lock()
+	defer migrationRegistry.data[m.ConnectionName()].mu.Unlock()
+	migrationRegistry.data[m.ConnectionName()].migrations = append(migrationRegistry.data[m.ConnectionName()].migrations, m)
 }
 
-func (m *BaseMigration) ID() string {
+func getMigrations(connectionName string) []contracts.Migration {
+	migrationRegistry.mu.RLock()
+	defer migrationRegistry.mu.RUnlock()
+
+	if connMigrations, exists := migrationRegistry.data[connectionName]; exists {
+		connMigrations.mu.RLock()
+		defer connMigrations.mu.RUnlock()
+
+		result := make([]contracts.Migration, len(connMigrations.migrations))
+		copy(result, connMigrations.migrations)
+		return result
+	}
+
+	return nil
+}
+
+func getAllConnectionNames() []string {
+	migrationRegistry.mu.RLock()
+	defer migrationRegistry.mu.RUnlock()
+
+	names := make([]string, 0, len(migrationRegistry.data))
+	for name := range migrationRegistry.data {
+		names = append(names, name)
+	}
+	return names
+}
+
+type baseMigration struct {
+	connectionName string
+	id             string
+	description    string
+	upQueries      []string
+	downQueries    []string
+}
+
+func (m *baseMigration) ConnectionName() string {
+	return m.connectionName
+}
+
+func (m *baseMigration) ID() string {
 	return m.id
 }
 
-func (m *BaseMigration) Description() string {
+func (m *baseMigration) Description() string {
 	return m.description
 }
 
-func (m *BaseMigration) Up() []string {
+func (m *baseMigration) Up() []string {
 	return m.upQueries
 }
 
-func (m *BaseMigration) Down() []string {
+func (m *baseMigration) Down() []string {
 	return m.downQueries
 }
 
-func (m *BaseMigration) AddUp(query string) *BaseMigration {
+func (m *baseMigration) AddUp(query string) *baseMigration {
 	m.upQueries = append(m.upQueries, query)
 	return m
 }
 
-func (m *BaseMigration) AddDown(query string) *BaseMigration {
+func (m *baseMigration) AddDown(query string) *baseMigration {
 	m.downQueries = append([]string{query}, m.downQueries...)
 	return m
 }
 
 type MigrationBuilder struct {
-	migration *BaseMigration
+	migration *baseMigration
 }
 
 func CreateMigration(id, description string) *MigrationBuilder {
 	return &MigrationBuilder{
-		migration: NewMigration(id, description),
+		migration: &baseMigration{
+			id:             id,
+			connectionName: "primary",
+			description:    description,
+			upQueries:      make([]string, 0),
+			downQueries:    make([]string, 0),
+		},
 	}
+}
+
+func (b *MigrationBuilder) ForConnection(connectionName string) *MigrationBuilder {
+	b.migration.connectionName = connectionName
+	return b
 }
 
 func (b *MigrationBuilder) CreateTable(tableName string, columns ...string) *MigrationBuilder {

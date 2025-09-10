@@ -92,8 +92,7 @@ func testUserOperations(t *testing.T, repo contracts.TransactionalRepository[Tes
 }
 
 func testIntegrationMigrationStatus(t *testing.T, database contracts.Database) {
-	runner := database.GetMigrationRunner()
-	status, err := runner.Status()
+	status, err := database.Status()
 	if err != nil {
 		t.Errorf("failed to get migration status: %v", err)
 	}
@@ -199,8 +198,7 @@ func testMigrationRollbackWorkflow(t *testing.T, database contracts.Database) {
 		t.Errorf("failed to run additional migrations: %v", err)
 	}
 
-	runner := database.GetMigrationRunner()
-	status, err := runner.Status()
+	status, err := database.Status()
 	if err != nil {
 		t.Errorf("failed to get migration status: %v", err)
 	}
@@ -209,12 +207,12 @@ func testMigrationRollbackWorkflow(t *testing.T, database contracts.Database) {
 		t.Errorf("expected at least 3 migrations, got %d", len(status))
 	}
 
-	err = runner.Rollback(1, migrations)
+	err = database.Rollback(1, migrations)
 	if err != nil {
 		t.Errorf("failed to rollback migration: %v", err)
 	}
 
-	status, err = runner.Status()
+	status, err = database.Status()
 	if err != nil {
 		t.Errorf("failed to get migration status after rollback: %v", err)
 	}

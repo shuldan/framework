@@ -18,7 +18,7 @@ func TestServer(t *testing.T) {
 	router.GET("/health", func(ctx contracts.HTTPContext) error {
 		return ctx.JSON(map[string]string{"status": "healthy"})
 	})
-	server, err := NewServer(router, logger, WithAddress(":8081"))
+	server, err := NewServer(router, logger, WithAddress(":0"))
 	if err != nil {
 		t.Errorf("NewServer should not return an error: %v", err)
 	}

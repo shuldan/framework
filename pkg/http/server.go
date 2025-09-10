@@ -68,18 +68,18 @@ func (s *httpServer) Start(_ context.Context) error {
 		return ErrServerAlreadyRunning
 	}
 
+	listener, err := net.Listen("tcp", s.config.address)
+	if err != nil {
+		return ErrServerStart.WithCause(err).WithDetail("addr", s.config.address)
+	}
+
 	s.server = &http.Server{
-		Addr:              s.config.address,
+		Addr:              listener.Addr().String(),
 		Handler:           s.router,
 		ReadHeaderTimeout: s.config.readHeaderTimeout,
 		ReadTimeout:       s.config.readTimeout,
 		WriteTimeout:      s.config.writeTimeout,
 		IdleTimeout:       s.config.idleTimeout,
-	}
-
-	listener, err := net.Listen("tcp", s.config.address)
-	if err != nil {
-		return ErrServerStart.WithCause(err).WithDetail("addr", s.config.address)
 	}
 
 	s.running = true
@@ -125,7 +125,10 @@ func (s *httpServer) Stop(ctx context.Context) error {
 func (s *httpServer) Addr() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.config.address
+	if !s.running {
+		return s.config.address
+	}
+	return s.server.Addr
 }
 
 func (s *httpServer) Handler() http.Handler {

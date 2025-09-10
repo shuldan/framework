@@ -19,7 +19,12 @@ type textHandler struct {
 	level       slog.Level
 }
 
-func newTextHandler(writer io.Writer, isColored bool, replaceAttr func(groups []string, a slog.Attr) slog.Attr, level slog.Level) slog.Handler {
+func newTextHandler(
+	writer io.Writer,
+	isColored bool,
+	replaceAttr func(groups []string, a slog.Attr) slog.Attr,
+	level slog.Level,
+) slog.Handler {
 	return &textHandler{
 		writer:      writer,
 		isColored:   isColored,
@@ -33,16 +38,13 @@ func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
-	var ts string
-	if !r.Time.IsZero() {
-		ts = r.Time.Format("2006/01/02 15:04:05")
-	}
+	levelStr := getLevelName(r.Level)
 
-	levelAttr := slog.Attr{Key: slog.LevelKey, Value: slog.AnyValue(r.Level)}
 	if h.replaceAttr != nil {
+		levelAttr := slog.String(slog.LevelKey, levelStr)
 		levelAttr = h.replaceAttr(h.groups, levelAttr)
+		levelStr = levelAttr.Value.String()
 	}
-	levelStr := levelAttr.Value.String()
 
 	var l string
 	if h.isColored && isTerminal(h.writer) {
@@ -51,9 +53,6 @@ func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 		l = levelStr
 	}
 
-	if ts != "" {
-		_, _ = fmt.Fprintf(h.writer, "%s ", ts)
-	}
 	_, _ = fmt.Fprintf(h.writer, "%s %s", l, r.Message)
 
 	r.Attrs(func(a slog.Attr) bool {

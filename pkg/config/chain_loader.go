@@ -1,6 +1,8 @@
 package config
 
-import "github.com/shuldan/framework/pkg/errors"
+import (
+	"github.com/shuldan/framework/pkg/errors"
+)
 
 type chainLoader struct {
 	loaders []Loader
@@ -25,16 +27,12 @@ func (c *chainLoader) Load() (map[string]any, error) {
 		}
 
 		if err = mergeMaps(final, config); err != nil {
-			return nil, ErrMergeFailed.
-				WithCause(err)
+			return nil, ErrMergeFailed.WithCause(err)
 		}
 	}
 
-	if len(final) == 0 {
-		if lastErr != nil {
-			return nil, ErrNoConfigSource.WithDetail("loader", "chain").WithCause(lastErr)
-		}
-		return nil, ErrNoConfigSource.WithDetail("loader", "chain")
+	if len(final) == 0 && lastErr != nil {
+		return nil, ErrNoConfigSource.WithDetail("loader", "chain").WithCause(lastErr)
 	}
 
 	return final, nil

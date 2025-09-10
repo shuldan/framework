@@ -6,16 +6,15 @@ import (
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
-	"github.com/shuldan/framework/pkg/errors"
 )
 
 type Module struct {
-	connections map[string]contracts.Database
+	pool *databasePool
 }
 
 func NewModule() contracts.AppModule {
 	return &Module{
-		connections: make(map[string]contracts.Database),
+		pool: newDatabasePool(),
 	}
 }
 
@@ -24,102 +23,100 @@ func (m *Module) Name() string {
 }
 
 func (m *Module) Register(container contracts.DIContainer) error {
-	return container.Factory("database", func(c contracts.DIContainer) (interface{}, error) {
-		cfg, err := c.Resolve(contracts.ConfigModuleName)
-		if err != nil {
-			return nil, ErrResolveConfig.
-				WithDetail("reason", err.Error()).
-				WithCause(err)
-		}
-
-		config := cfg.(contracts.Config)
-		dbConfig, ok := config.GetSub("database")
-		if !ok {
-			return nil, ErrConfigNotFound
-		}
-
-		defaultConnection := dbConfig.GetString("default", "primary")
-		connectionsConfig, ok := dbConfig.GetSub("connections")
-		if !ok {
-			return nil, ErrConnectionsNotFound
-		}
-
-		connections := make(map[string]contracts.Database)
-		allConnections := connectionsConfig.All()
-		for name, connData := range allConnections {
-			connMap, ok := connData.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			db, err := m.createConnection(name, connMap)
-			if err != nil {
-				return nil, ErrCreateConnection.
-					WithDetail("name", name).
-					WithDetail("reason", err.Error()).
-					WithCause(err)
-			}
-			connections[name] = db
-			connKey := fmt.Sprintf("database.%s", name)
-			if err := c.Instance(connKey, db); err != nil {
-				return nil, ErrRegisterConnection.
-					WithDetail("name", name).
-					WithDetail("reason", err.Error()).
-					WithCause(err)
-			}
-		}
-		if defaultDB, ok := connections[defaultConnection]; ok {
-			if err := c.Instance("database.default", defaultDB); err != nil {
-				return nil, ErrRegisterConnection.
-					WithDetail("name", "default").
-					WithDetail("reason", err.Error()).
-					WithCause(err)
-			}
-		}
-
-		m.connections = connections
-		return connections, nil
-	})
-}
-
-func (m *Module) Start(ctx contracts.AppContext) error {
-	dbs, err := ctx.Container().Resolve("database")
+	cfg, err := container.Resolve(contracts.ConfigModuleName)
 	if err != nil {
-		return ErrResolveConnections.
+		return ErrResolveConfig.
 			WithDetail("reason", err.Error()).
 			WithCause(err)
 	}
 
-	connections := dbs.(map[string]contracts.Database)
+	config := cfg.(contracts.Config)
+	dbConfig, ok := config.GetSub("database")
+	if !ok {
+		return ErrConfigNotFound.WithDetail("reason", "database config not found")
+	}
 
-	for name, db := range connections {
-		if err := db.Connect(); err != nil {
-			return ErrConnectDatabase.
+	defaultConnectionName := dbConfig.GetString("default", "primary")
+	connectionsConfig, ok := dbConfig.GetSub("connections")
+	if !ok {
+		return ErrConnectionsNotFound
+	}
+	allConnections := connectionsConfig.All()
+	for name, connData := range allConnections {
+		connMap, ok := connData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		db, err := m.createConnection(name, connMap)
+		if err != nil {
+			return ErrCreateConnection.
 				WithDetail("name", name).
 				WithDetail("reason", err.Error()).
 				WithCause(err)
 		}
+		if err := m.pool.registerDatabase(name, db); err != nil {
+			return err
+		}
+		if err := container.Instance(contracts.DatabaseModuleName+".connections."+name, db); err != nil {
+			return err
+		}
+		if name == defaultConnectionName {
+			if err := container.Instance(contracts.DatabaseModuleName+"."+name, db); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := m.pool.connectAll(); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (m *Module) Stop(_ contracts.AppContext) error {
-	var errs []error
+func (m *Module) Start(ctx contracts.AppContext) error {
+	return nil
+}
 
-	for name, db := range m.connections {
-		if err := db.Close(); err != nil {
-			errs = append(errs, ErrCloseDatabase.
-				WithDetail("name", name).
-				WithDetail("reason", err.Error()).
-				WithCause(err))
+func (m *Module) Stop(_ contracts.AppContext) error {
+	return m.pool.closeAll()
+}
+
+func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, error) {
+	registry := ctx.AppRegistry()
+	for _, module := range registry.All() {
+		if provider, ok := module.(contracts.MigrationsProvider); ok {
+			migrations := provider.Migrations()
+			for _, m := range migrations {
+				registerMigration(m)
+			}
 		}
 	}
 
-	if len(errs) > 0 {
-		return ErrMultipleCloseErrors.WithCause(errors.Join(errs...))
+	container := ctx.Container()
+	configRaw, err := container.Resolve(contracts.ConfigModuleName)
+	if err != nil {
+		return nil, err
+	}
+	config, ok := configRaw.(contracts.Config)
+	if !ok {
+		return nil, fmt.Errorf("invalid config instance")
 	}
 
-	return nil
+	loggerRaw, err := container.Resolve(contracts.LoggerModuleName)
+	if err != nil {
+		return nil, err
+	}
+	logger, ok := loggerRaw.(contracts.Logger)
+	if !ok {
+		return nil, fmt.Errorf("invalid logger instance")
+	}
+
+	return []contracts.CliCommand{
+		newMigrationUpCommand(m.pool, config, logger),
+		newMigrationDownCommand(m.pool, config, logger),
+		newMigrationStatusCommand(m.pool, config, logger),
+	}, nil
 }
 
 func (m *Module) createConnection(name string, config map[string]interface{}) (contracts.Database, error) {

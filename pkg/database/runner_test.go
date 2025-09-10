@@ -19,7 +19,7 @@ func TestMigrationRunner(t *testing.T) {
 		}
 	}()
 
-	runner := NewMigrationRunner(db)
+	runner := newMigrationRunner(db)
 
 	testCreateMigrationTable(t, runner)
 	testRunEmptyMigrations(t, runner)
@@ -32,7 +32,7 @@ func TestMigrationRunner(t *testing.T) {
 	testFailedMigrationRollback(t, runner)
 }
 
-func testCreateMigrationTable(t *testing.T, runner contracts.MigrationRunner) {
+func testCreateMigrationTable(t *testing.T, runner MigrationRunner) {
 	t.Run("CreateMigrationTable", func(t *testing.T) {
 		err := runner.CreateMigrationTable()
 		if err != nil {
@@ -56,22 +56,22 @@ func testCreateMigrationTable(t *testing.T, runner contracts.MigrationRunner) {
 	})
 }
 
-func testRunEmptyMigrations(t *testing.T, runner contracts.MigrationRunner) {
-	t.Run("Run empty migrations", func(t *testing.T) {
-		err := runner.Run([]contracts.Migration{})
+func testRunEmptyMigrations(t *testing.T, runner MigrationRunner) {
+	t.Run("Migrate empty migrations", func(t *testing.T) {
+		err := runner.Migrate([]contracts.Migration{})
 		if err != nil {
 			t.Errorf("running empty migrations failed: %v", err)
 		}
 	})
 }
 
-func testRunSingleMigration(t *testing.T, db *sql.DB, runner contracts.MigrationRunner) {
-	t.Run("Run single migration", func(t *testing.T) {
+func testRunSingleMigration(t *testing.T, db *sql.DB, runner MigrationRunner) {
+	t.Run("Migrate single migration", func(t *testing.T) {
 		migration := CreateMigration("001", "create users table").
 			CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
 			Build()
 
-		err := runner.Run([]contracts.Migration{migration})
+		err := runner.Migrate([]contracts.Migration{migration})
 		if err != nil {
 			t.Errorf("failed to run migration: %v", err)
 		}
@@ -96,8 +96,8 @@ func testRunSingleMigration(t *testing.T, db *sql.DB, runner contracts.Migration
 	})
 }
 
-func testRunMultipleMigrations(t *testing.T, db *sql.DB, runner contracts.MigrationRunner) {
-	t.Run("Run multiple migrations", func(t *testing.T) {
+func testRunMultipleMigrations(t *testing.T, db *sql.DB, runner MigrationRunner) {
+	t.Run("Migrate multiple migrations", func(t *testing.T) {
 		migration2 := CreateMigration("002", "create posts table").
 			CreateTable("posts", "id INTEGER PRIMARY KEY", "title TEXT NOT NULL", "user_id INTEGER").
 			Build()
@@ -106,7 +106,7 @@ func testRunMultipleMigrations(t *testing.T, db *sql.DB, runner contracts.Migrat
 			CreateIndex("idx_posts_user_id", "posts", "user_id").
 			Build()
 
-		err := runner.Run([]contracts.Migration{migration2, migration3})
+		err := runner.Migrate([]contracts.Migration{migration2, migration3})
 		if err != nil {
 			t.Errorf("failed to run migrations: %v", err)
 		}
@@ -142,13 +142,13 @@ func testRunMultipleMigrations(t *testing.T, db *sql.DB, runner contracts.Migrat
 	})
 }
 
-func testSkipAppliedMigrations(t *testing.T, runner contracts.MigrationRunner) {
+func testSkipAppliedMigrations(t *testing.T, runner MigrationRunner) {
 	t.Run("Skip already applied migrations", func(t *testing.T) {
 		migration1 := CreateMigration("001", "create users table").
 			CreateTable("users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL").
 			Build()
 
-		err := runner.Run([]contracts.Migration{migration1})
+		err := runner.Migrate([]contracts.Migration{migration1})
 		if err != nil {
 			t.Errorf("failed to run already applied migration: %v", err)
 		}
@@ -165,7 +165,7 @@ func testSkipAppliedMigrations(t *testing.T, runner contracts.MigrationRunner) {
 	})
 }
 
-func testRunnerMigrationStatus(t *testing.T, runner contracts.MigrationRunner) {
+func testRunnerMigrationStatus(t *testing.T, runner MigrationRunner) {
 	t.Run("Status", func(t *testing.T) {
 		status, err := runner.Status()
 		if err != nil {
@@ -192,7 +192,7 @@ func testRunnerMigrationStatus(t *testing.T, runner contracts.MigrationRunner) {
 	})
 }
 
-func testMigrationRollback(t *testing.T, runner contracts.MigrationRunner) {
+func testMigrationRollback(t *testing.T, runner MigrationRunner) {
 	t.Run("Rollback", func(t *testing.T) {
 		migrations := []contracts.Migration{
 			CreateMigration("001", "create users table").
@@ -255,7 +255,7 @@ func testMigrationRollback(t *testing.T, runner contracts.MigrationRunner) {
 	})
 }
 
-func testRollbackWithNoMigrations(t *testing.T, runner contracts.MigrationRunner) {
+func testRollbackWithNoMigrations(t *testing.T, runner MigrationRunner) {
 	t.Run("Rollback with no migrations", func(t *testing.T) {
 		err := runner.Rollback(1, []contracts.Migration{})
 		if !errors.Is(err, ErrNoMigrationsToRollback) {
@@ -264,13 +264,13 @@ func testRollbackWithNoMigrations(t *testing.T, runner contracts.MigrationRunner
 	})
 }
 
-func testFailedMigrationRollback(t *testing.T, runner contracts.MigrationRunner) {
+func testFailedMigrationRollback(t *testing.T, runner MigrationRunner) {
 	t.Run("Failed migration rollback", func(t *testing.T) {
 		migration := CreateMigration("004", "test table").
 			CreateTable("test_table", "id INTEGER PRIMARY KEY").
 			Build()
 
-		err := runner.Run([]contracts.Migration{migration})
+		err := runner.Migrate([]contracts.Migration{migration})
 		if err != nil {
 			t.Errorf("failed to run migration: %v", err)
 		}
@@ -296,7 +296,7 @@ func TestMigrationRunnerTransactions(t *testing.T) {
 		}
 	}()
 
-	runner := NewMigrationRunner(db)
+	runner := newMigrationRunner(db)
 
 	t.Run("Transaction rollback on failure", func(t *testing.T) {
 		migration1 := CreateMigration("001", "create users").
@@ -307,7 +307,7 @@ func TestMigrationRunnerTransactions(t *testing.T) {
 			RawUp("INVALID SQL SYNTAX;").
 			Build()
 
-		err := runner.Run([]contracts.Migration{migration1, migration2})
+		err := runner.Migrate([]contracts.Migration{migration1, migration2})
 		if err == nil {
 			t.Error("expected migration to fail")
 		}

@@ -175,33 +175,33 @@ func TestDatabaseOptions(t *testing.T) {
 	tests := []struct {
 		name     string
 		option   Option
-		validate func(*dbDonfig) bool
+		validate func(*dbConfig) bool
 	}{
 		{
 			name:   "connection pool option",
 			option: WithConnectionPool(20, 10, time.Hour*2),
-			validate: func(config *dbDonfig) bool {
+			validate: func(config *dbConfig) bool {
 				return config.maxOpenConns == 20 && config.maxIdleConns == 10 && config.connMaxLifetime == time.Hour*2
 			},
 		},
 		{
 			name:   "connection idle time option",
 			option: WithConnectionIdleTime(time.Minute * 10),
-			validate: func(config *dbDonfig) bool {
+			validate: func(config *dbConfig) bool {
 				return config.connMaxIdleTime == time.Minute*10
 			},
 		},
 		{
 			name:   "ping timeout option",
 			option: WithPingTimeout(time.Second * 30),
-			validate: func(config *dbDonfig) bool {
+			validate: func(config *dbConfig) bool {
 				return config.pingTimeout == time.Second*30
 			},
 		},
 		{
 			name:   "retry option",
 			option: WithRetry(10, time.Second*2),
-			validate: func(config *dbDonfig) bool {
+			validate: func(config *dbConfig) bool {
 				return config.retryAttempts == 10 && config.retryDelay == time.Second*2
 			},
 		},
@@ -209,7 +209,7 @@ func TestDatabaseOptions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &dbDonfig{}
+			config := &dbConfig{}
 			tt.option(config)
 
 			if !tt.validate(config) {

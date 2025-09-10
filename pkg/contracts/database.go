@@ -31,12 +31,32 @@ type Transaction interface {
 	Rollback() error
 }
 
+type Migration interface {
+	ID() string
+	ConnectionName() string
+	Description() string
+	Up() []string
+	Down() []string
+}
+
+type MigrationStatus struct {
+	ID          string
+	Description string
+	AppliedAt   *time.Time
+	Batch       int
+}
+
+type MigrationsProvider interface {
+	Migrations() []Migration
+}
+
 type Database interface {
 	Connect() error
 	Close() error
 	Ping(ctx context.Context) error
 	Migrate(migrations []Migration) error
-	GetMigrationRunner() MigrationRunner
+	Rollback(steps int, migrations []Migration) error
+	Status() ([]MigrationStatus, error)
 	BeginTx(ctx context.Context) (Transaction, error)
 }
 
@@ -68,25 +88,4 @@ type StrategyRepository[T Aggregate, I ID] interface {
 	TransactionalRepository[T, I]
 	WithStrategy(strategy LoadingStrategy) Repository[T, I]
 	GetStrategy() LoadingStrategy
-}
-
-type Migration interface {
-	ID() string
-	Description() string
-	Up() []string
-	Down() []string
-}
-
-type MigrationStatus struct {
-	ID          string
-	Description string
-	AppliedAt   *time.Time
-	Batch       int
-}
-
-type MigrationRunner interface {
-	Run(migrations []Migration) error
-	Rollback(steps int, migrations []Migration) error
-	Status() ([]MigrationStatus, error)
-	CreateMigrationTable() error
 }

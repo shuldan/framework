@@ -62,11 +62,7 @@ func (m *module) Start(ctx contracts.AppContext) error {
 		}
 	}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		return err
-	}
-	return cliInst.Run(NewContext(ctx, r, w, os.Args[1:]))
+	return cliInst.Run(NewContext(ctx, os.Stdin, os.Stdout, os.Args[1:]))
 }
 
 func (m *module) Stop(contracts.AppContext) error {

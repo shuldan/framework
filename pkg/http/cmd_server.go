@@ -36,7 +36,7 @@ func (c *serverCommand) Description() string {
 }
 
 func (c *serverCommand) Group() string {
-	return "http"
+	return contracts.HttpCliGroup
 }
 
 func (c *serverCommand) Configure(flags *flag.FlagSet) {}

@@ -29,7 +29,7 @@ func (h *HelpCommand) Description() string {
 }
 
 func (h *HelpCommand) Group() string {
-	return "system"
+	return contracts.SystemCliGroup
 }
 
 func (h *HelpCommand) Configure(flags *flag.FlagSet) {

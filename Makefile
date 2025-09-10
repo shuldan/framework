@@ -65,7 +65,7 @@ vet:
 # test: запуск тестов
 test:
 	@echo "Running tests..."
-	@go test -race ./... -count=1
+	@go test -race -count=1 -timeout 30s ./...
 
 # test-coverage: с отчётом о покрытии
 test-coverage:

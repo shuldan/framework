@@ -208,12 +208,17 @@ func (w *WebsocketConnection) Close() error {
 	}
 	w.closed = true
 	close(w.done)
+	if c, ok := w.conn.(interface{ CloseWrite() error }); ok {
+		_ = c.CloseWrite()
+	} else {
+		_ = w.conn.Close()
+	}
 	w.mu.Unlock()
 
 	w.wg.Wait()
 
 	close(w.readChan)
-	return w.conn.Close()
+	return nil
 }
 
 func (w *WebsocketConnection) Ping(_ context.Context) error {

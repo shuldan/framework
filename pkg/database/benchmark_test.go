@@ -188,13 +188,11 @@ func BenchmarkMigrationRunner(b *testing.B) {
 				}
 			}(database)
 
-			runner := database.GetMigrationRunner()
-
 			migration := CreateMigration(fmt.Sprintf("bench_%d", i), "benchmark migration").
 				CreateTable(fmt.Sprintf("bench_table_%d", i), "id INTEGER PRIMARY KEY", "data TEXT").
 				Build()
 
-			err := runner.Run([]contracts.Migration{migration})
+			err := database.Migrate([]contracts.Migration{migration})
 			if err != nil {
 				b.Errorf("migration failed on iteration %d: %v", i, err)
 			}

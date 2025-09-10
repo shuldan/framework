@@ -14,8 +14,8 @@ func TestBaseMigration(t *testing.T) {
 }
 
 func testNewMigration(t *testing.T) {
-	t.Run("NewMigration", func(t *testing.T) {
-		migration := NewMigration("001", "create users table")
+	t.Run("newMigration", func(t *testing.T) {
+		migration := CreateMigration("001", "create users table").Build()
 
 		if migration.ID() != "001" {
 			t.Errorf("expected ID '001', got '%s'", migration.ID())
@@ -34,7 +34,7 @@ func testNewMigration(t *testing.T) {
 
 func testAddUpAndDown(t *testing.T) {
 	t.Run("AddUp and AddDown", func(t *testing.T) {
-		migration := NewMigration("001", "test")
+		migration := CreateMigration("001", "test").Build().(*baseMigration)
 		migration.AddUp("CREATE TABLE test (id INTEGER);")
 		migration.AddDown("DROP TABLE test;")
 
@@ -59,7 +59,7 @@ func testAddUpAndDown(t *testing.T) {
 
 func testMultipleQueries(t *testing.T) {
 	t.Run("Multiple queries", func(t *testing.T) {
-		migration := NewMigration("002", "multiple operations")
+		migration := CreateMigration("002", "multiple operations").Build().(*baseMigration)
 		migration.AddUp("CREATE TABLE users (id INTEGER);")
 		migration.AddUp("CREATE TABLE posts (id INTEGER);")
 		migration.AddDown("DROP TABLE posts;")
@@ -283,10 +283,10 @@ func testRawQueries(t *testing.T) {
 }
 
 func TestMigrationInterface(t *testing.T) {
-	var _ contracts.Migration = (*BaseMigration)(nil)
+	var _ contracts.Migration = (*baseMigration)(nil)
 	const id = "test"
 
-	migration := NewMigration(id, "test migration")
+	migration := CreateMigration(id, "test migration").Build().(*baseMigration)
 	migration.AddUp("CREATE TABLE test (id INTEGER);")
 	migration.AddDown("DROP TABLE test;")
 
