@@ -165,6 +165,10 @@ func (d *sqlDatabase) BeginTx(ctx context.Context) (contracts.Transaction, error
 	return &sqlTransaction{tx: tx}, nil
 }
 
+func (d *sqlDatabase) Connection() *sql.DB {
+	return d.db
+}
+
 type sqlTransaction struct {
 	tx *sql.Tx
 }

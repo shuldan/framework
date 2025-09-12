@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -58,6 +59,7 @@ type Database interface {
 	Rollback(steps int, migrations []Migration) error
 	Status() ([]MigrationStatus, error)
 	BeginTx(ctx context.Context) (Transaction, error)
+	Connection() *sql.DB
 }
 
 type Finder[T Aggregate, I ID] interface {
