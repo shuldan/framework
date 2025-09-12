@@ -244,14 +244,11 @@ func (r *strategyRepository[T, I, M]) DeleteBy(ctx context.Context, criteria map
 }
 
 func (r *strategyRepository[T, I, M]) WithTx(tx contracts.Transaction) contracts.Repository[T, I] {
-	txImpl, ok := tx.(*sqlTransaction)
+	provider, ok := tx.(*sqlTransaction)
 	if !ok {
 		return r
 	}
-	sqlTx, ok := txImpl.getConnection().(*sql.Tx)
-	if !ok {
-		return r
-	}
+	sqlTx := provider.getConnection()
 
 	return &strategyRepository[T, I, M]{
 		db:        r.db,

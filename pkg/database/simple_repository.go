@@ -283,18 +283,17 @@ func (r *simpleRepository[T, I, M]) DeleteBy(ctx context.Context, criteria map[s
 }
 
 type connectionProvider interface {
-	getConnection() interface{}
+	getConnection() *sql.Tx
 }
 
 func (r *simpleRepository[T, I, M]) WithTx(tx contracts.Transaction) contracts.Repository[T, I] {
 	if provider, ok := tx.(connectionProvider); ok {
-		if sqlTx, ok := provider.getConnection().(*sql.Tx); ok {
-			return &simpleRepository[T, I, M]{
-				db:        r.db,
-				tx:        sqlTx,
-				tableName: r.tableName,
-				mapper:    r.mapper,
-			}
+		sqlTx := provider.getConnection()
+		return &simpleRepository[T, I, M]{
+			db:        r.db,
+			tx:        sqlTx,
+			tableName: r.tableName,
+			mapper:    r.mapper,
 		}
 	}
 	return r

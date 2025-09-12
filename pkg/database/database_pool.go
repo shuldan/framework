@@ -40,6 +40,9 @@ func (p *databasePool) getDatabase(name string) (contracts.Database, bool) {
 }
 
 func (p *databasePool) connectAll() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var errs []error
 	for _, db := range p.connections {
 		if err := db.Connect(); err != nil {

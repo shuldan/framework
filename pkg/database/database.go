@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -59,6 +60,7 @@ type sqlDatabase struct {
 	dsn             string
 	migrationRunner MigrationRunner
 	config          dbConfig
+	mu              sync.Mutex
 }
 
 func NewDatabase(driver, dsn string, options ...Option) contracts.Database {
@@ -87,6 +89,8 @@ func (d *sqlDatabase) Connect() error {
 	if d.db != nil {
 		return nil
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	var db *sql.DB
 	var err error
@@ -122,6 +126,9 @@ func (d *sqlDatabase) Close() error {
 	if d.db == nil {
 		return nil
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	return d.db.Close()
 }
 
@@ -129,25 +136,47 @@ func (d *sqlDatabase) Ping(ctx context.Context) error {
 	if d.db == nil {
 		return ErrDatabaseNotConnected
 	}
-	return d.db.PingContext(ctx)
+	d.mu.Lock()
+	db := d.db
+	d.mu.Unlock()
+
+	return db.PingContext(ctx)
 }
 
 func (d *sqlDatabase) Migrate(migrations []contracts.Migration) error {
 	if d.db == nil {
 		return ErrDatabaseNotConnected
 	}
-	return d.migrationRunner.Migrate(migrations)
+
+	d.mu.Lock()
+	runner := d.migrationRunner
+	d.mu.Unlock()
+
+	return runner.Migrate(migrations)
 }
 
 func (d *sqlDatabase) Rollback(steps int, migrations []contracts.Migration) error {
 	if d.db == nil {
 		return ErrDatabaseNotConnected
 	}
-	return d.migrationRunner.Rollback(steps, migrations)
+
+	d.mu.Lock()
+	runner := d.migrationRunner
+	d.mu.Unlock()
+
+	return runner.Rollback(steps, migrations)
 }
 
 func (d *sqlDatabase) Status() ([]contracts.MigrationStatus, error) {
-	return d.migrationRunner.Status()
+	if d.db == nil {
+		return nil, ErrDatabaseNotConnected
+	}
+
+	d.mu.Lock()
+	runner := d.migrationRunner
+	d.mu.Unlock()
+
+	return runner.Status()
 }
 
 func (d *sqlDatabase) BeginTx(ctx context.Context) (contracts.Transaction, error) {
@@ -155,7 +184,11 @@ func (d *sqlDatabase) BeginTx(ctx context.Context) (contracts.Transaction, error
 		return nil, ErrDatabaseNotConnected
 	}
 
-	tx, err := d.db.BeginTx(ctx, nil)
+	d.mu.Lock()
+	db := d.db
+	d.mu.Unlock()
+
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, ErrTransactionFailed.
 			WithDetail("reason", err.Error()).
@@ -193,6 +226,6 @@ func (t *sqlTransaction) Rollback() error {
 	return nil
 }
 
-func (t *sqlTransaction) getConnection() interface{} {
+func (t *sqlTransaction) getConnection() *sql.Tx {
 	return t.tx
 }

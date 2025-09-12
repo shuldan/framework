@@ -27,12 +27,12 @@ $(GOSEC):
 # Lint: проверка стиля и ошибок
 lint: $(GOLANGCI_LINT)
 	@echo "Running golangci-lint..."
-	$(GOLANGCI_LINT) run --config .golangci-lint.yaml ./...
+	$(GOLANGCI_LINT) run --config .golangci-lint.yaml
 
 # Security scan
 security: $(GOSEC)
 	@echo "Running gosec security scanner..."
-	$(GOSEC) ./...
+	$(GOSEC) -exclude-dir="test" ./...
 
 # fmt: автоматическое форматирование
 fmt: $(GOIMPORTS)

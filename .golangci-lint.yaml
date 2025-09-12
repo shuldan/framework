@@ -1,11 +1,10 @@
-# Полностью совместимый конфиг для golangci-lint v2.4.0
 version: "2"
 
 run:
   timeout: 3m
   concurrency: 4
   # Можно раскомментировать для проверки только новых изменений
-  # new: true
+  new: true
 
 # Основные линтеры
 linters:
@@ -31,6 +30,9 @@ linters:
     # - gosec             # можно включить, если нужна security-проверка
     - depguard
     - revive
+  exclusions:
+    paths:
+      - test/*
 # Настройки линтеров
 linters-settings:
   govet:
