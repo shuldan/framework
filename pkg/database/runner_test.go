@@ -21,7 +21,6 @@ func TestMigrationRunner(t *testing.T) {
 
 	runner := newMigrationRunner(db)
 
-	testCreateMigrationTable(t, runner)
 	testRunEmptyMigrations(t, runner)
 	testRunSingleMigration(t, db, runner)
 	testRunMultipleMigrations(t, db, runner)
@@ -30,30 +29,6 @@ func TestMigrationRunner(t *testing.T) {
 	testMigrationRollback(t, runner)
 	testRollbackWithNoMigrations(t, runner)
 	testFailedMigrationRollback(t, runner)
-}
-
-func testCreateMigrationTable(t *testing.T, runner MigrationRunner) {
-	t.Run("CreateMigrationTable", func(t *testing.T) {
-		err := runner.CreateMigrationTable()
-		if err != nil {
-			t.Errorf("failed to create migration table: %v", err)
-		}
-
-		sqlRunner := runner.(*sqlMigrationRunner)
-		var count int
-		err = sqlRunner.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&count)
-		if err != nil {
-			t.Errorf("failed to check table existence: %v", err)
-		}
-		if count != 1 {
-			t.Error("schema_migrations table was not created")
-		}
-
-		err = runner.CreateMigrationTable()
-		if err != nil {
-			t.Errorf("second CreateMigrationTable call failed: %v", err)
-		}
-	})
 }
 
 func testRunEmptyMigrations(t *testing.T, runner MigrationRunner) {

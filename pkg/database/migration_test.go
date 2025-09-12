@@ -111,7 +111,7 @@ func testCreateTable(t *testing.T) {
 			t.Errorf("expected 1 up query, got %d", len(upQueries))
 		}
 
-		expectedUp := "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);"
+		expectedUp := "CREATE TABLE IF NOT EXISTS users (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);"
 		if upQueries[0] != expectedUp {
 			t.Errorf("unexpected up query:\nexpected: %s\ngot: %s", expectedUp, upQueries[0])
 		}
@@ -244,7 +244,7 @@ func testChainedOperations(t *testing.T) {
 			t.Errorf("expected 4 down queries, got %d", len(downQueries))
 		}
 
-		if !strings.Contains(upQueries[0], "CREATE TABLE categories") {
+		if !strings.Contains(upQueries[0], "CREATE TABLE IF NOT EXISTS categories") {
 			t.Errorf("first up query should create categories table: %s", upQueries[0])
 		}
 

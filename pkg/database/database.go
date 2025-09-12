@@ -51,7 +51,6 @@ type MigrationRunner interface {
 	Migrate(migrations []contracts.Migration) error
 	Rollback(steps int, migrations []contracts.Migration) error
 	Status() ([]contracts.MigrationStatus, error)
-	CreateMigrationTable() error
 }
 
 type sqlDatabase struct {

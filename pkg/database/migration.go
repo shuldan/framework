@@ -20,6 +20,12 @@ var migrationRegistry = struct {
 	data: make(map[string]*connectionMigrations),
 }
 
+func cleanupMigrationRegistry() {
+	migrationRegistry.mu.Lock()
+	defer migrationRegistry.mu.Unlock()
+	migrationRegistry.data = make(map[string]*connectionMigrations)
+}
+
 func registerMigration(m contracts.Migration) {
 	migrationRegistry.mu.Lock()
 	defer migrationRegistry.mu.Unlock()
@@ -49,17 +55,6 @@ func getMigrations(connectionName string) []contracts.Migration {
 	}
 
 	return nil
-}
-
-func getAllConnectionNames() []string {
-	migrationRegistry.mu.RLock()
-	defer migrationRegistry.mu.RUnlock()
-
-	names := make([]string, 0, len(migrationRegistry.data))
-	for name := range migrationRegistry.data {
-		names = append(names, name)
-	}
-	return names
 }
 
 type baseMigration struct {
@@ -122,7 +117,7 @@ func (b *MigrationBuilder) ForConnection(connectionName string) *MigrationBuilde
 }
 
 func (b *MigrationBuilder) CreateTable(tableName string, columns ...string) *MigrationBuilder {
-	query := fmt.Sprintf("CREATE TABLE %s (\n    %s\n);",
+	query := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n    %s\n);",
 		tableName, strings.Join(columns, ",\n    "))
 	b.migration.AddUp(query)
 	b.migration.AddDown(fmt.Sprintf("DROP TABLE IF EXISTS %s;", tableName))

@@ -31,12 +31,7 @@ func (c *migrationStatusCommand) Validate(_ contracts.CliContext) error {
 
 func (c *migrationStatusCommand) Execute(ctx contracts.CliContext) error {
 	out := ctx.Output()
-	connectionNames := getAllConnectionNames()
-	if len(connectionNames) == 0 {
-		_, _ = fmt.Fprintln(out, "No connections with registered migrations found")
-		ctx.Ctx().Stop()
-		return nil
-	}
+	connectionNames := c.pool.getConnectionNames()
 	var errs []error
 	for _, connName := range connectionNames {
 		_, exists := c.pool.getDatabase(connName)

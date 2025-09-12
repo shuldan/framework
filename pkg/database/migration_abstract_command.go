@@ -20,12 +20,10 @@ func (c *migrationAbstractCommand) Configure(flags *flag.FlagSet) {
 
 func (c *migrationAbstractCommand) processAllConnections(_ contracts.CliContext, op func(connName string, db contracts.Database) error) error {
 	var errs []error
-	connectionNames := getAllConnectionNames()
 
-	for _, connectionName := range connectionNames {
+	for _, connectionName := range c.pool.getConnectionNames() {
 		db, ok := c.pool.getDatabase(connectionName)
 		if !ok {
-			errs = append(errs, ErrConnectionNotFound.WithDetail("name", connectionName))
 			continue
 		}
 		if err := op(connectionName, db); err != nil {

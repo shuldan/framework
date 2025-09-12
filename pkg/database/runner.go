@@ -31,7 +31,7 @@ const migrationTableIndexSQL = `
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_batch ON schema_migrations(batch);
 `
 
-func (r *sqlMigrationRunner) CreateMigrationTable() error {
+func (r *sqlMigrationRunner) createMigrationTable() error {
 	_, err := r.db.Exec(migrationTableSQL)
 	if err != nil {
 		return ErrFailedToCreateSchemaMigrationsTable.WithCause(err)
@@ -47,10 +47,6 @@ func (r *sqlMigrationRunner) CreateMigrationTable() error {
 
 func (r *sqlMigrationRunner) Migrate(migrations []contracts.Migration) error {
 	ctx := context.Background()
-
-	if err := r.CreateMigrationTable(); err != nil {
-		return err
-	}
 
 	applied, err := r.getAppliedMigrations(ctx)
 	if err != nil {
@@ -233,6 +229,9 @@ func (r *sqlMigrationRunner) deleteMigrationRecord(ctx context.Context, tx *sql.
 }
 
 func (r *sqlMigrationRunner) getAppliedMigrations(ctx context.Context) ([]contracts.MigrationStatus, error) {
+	if err := r.createMigrationTable(); err != nil {
+		return nil, err
+	}
 	query := "SELECT id, description, applied_at, batch FROM schema_migrations ORDER BY batch, id"
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {

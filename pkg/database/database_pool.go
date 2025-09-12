@@ -1,6 +1,7 @@
 package database
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -68,4 +69,15 @@ func (p *databasePool) closeAll() error {
 		return ErrMultipleCloseErrors.WithCause(errors.Join(errs...))
 	}
 	return nil
+}
+
+func (p *databasePool) getConnectionNames() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	names := make([]string, 0, len(p.connections))
+	for name := range p.connections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
