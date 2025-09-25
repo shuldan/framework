@@ -38,7 +38,7 @@ func testNewRepositoryFactory(t *testing.T, db *sql.DB) {
 func testCreateSimpleRepository(t *testing.T, db *sql.DB) {
 	t.Run("CreateSimpleRepository", func(t *testing.T) {
 		mapper := &TestUserMapper{}
-		repo := CreateSimpleRepository[TestUser, IntID, TestUserMemento](db, mapper)
+		repo := CreateSimpleRepository[TestUser, contracts.ID, TestUserMemento](db, mapper)
 
 		if repo == nil {
 			t.Fatal("CreateSimpleRepository returned nil")
@@ -66,7 +66,7 @@ func testCreateSimpleRepository(t *testing.T, db *sql.DB) {
 func testCreateStrategyRepository(t *testing.T, db *sql.DB) {
 	t.Run("CreateStrategyRepository", func(t *testing.T) {
 		mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
-		repo := CreateStrategyRepository[TestUser, IntID, TestUserMemento](
+		repo := CreateStrategyRepository[TestUser, contracts.ID, TestUserMemento](
 			db, mapper, contracts.LoadingStrategyJoin)
 
 		if repo == nil {
@@ -82,7 +82,7 @@ func testCreateStrategyRepository(t *testing.T, db *sql.DB) {
 	})
 }
 
-func testStrategyRepositoryOperations(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID]) {
+func testStrategyRepositoryOperations(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID]) {
 	ctx := context.Background()
 	user := NewTestUser(2, "Strategy Factory User", "strategy_factory@example.com")
 
@@ -101,7 +101,7 @@ func testStrategyRepositoryOperations(t *testing.T, repo contracts.StrategyRepos
 	}
 }
 
-func testStrategyRepositoryWithDifferentStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID]) {
+func testStrategyRepositoryWithDifferentStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID]) {
 	ctx := context.Background()
 	user := NewTestUser(2, "Strategy Factory User", "strategy_factory@example.com")
 

@@ -12,7 +12,7 @@ import (
 )
 
 type TestUser struct {
-	id    IntID
+	id    contracts.ID
 	name  string
 	email string
 }
@@ -30,7 +30,7 @@ func NewTestUser(id int64, name, email string) TestUser {
 }
 
 type TestUserMemento struct {
-	ID    IntID
+	ID    contracts.ID
 	Name  string
 	Email string
 }
@@ -67,7 +67,7 @@ func (m *TestUserMapper) RestoreAggregate(memento TestUserMemento) TestUser {
 
 func (m *TestUserMapper) ToColumns(memento TestUserMemento) (columns []string, values []interface{}) {
 	return []string{"id", "name", "email"},
-		[]interface{}{memento.ID.Int64(), memento.Name, memento.Email}
+		[]interface{}{memento.ID.String(), memento.Name, memento.Email}
 }
 
 func (m *TestUserMapper) FromRow(row *sql.Row) (TestUserMemento, error) {
@@ -102,7 +102,7 @@ func TestSimpleRepository(t *testing.T) {
 	}()
 
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](db, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](db, mapper)
 
 	ctx := context.Background()
 
@@ -116,7 +116,7 @@ func TestSimpleRepository(t *testing.T) {
 	testInvalidOperations(t, repo, ctx)
 }
 
-func testSaveAndFind(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testSaveAndFind(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Save new entity", func(t *testing.T) {
 		user := NewTestUser(1, "John Doe", "john@example.com")
 		err := repo.Save(ctx, user)
@@ -163,7 +163,7 @@ func testSaveAndFind(t *testing.T, repo contracts.TransactionalRepository[TestUs
 	})
 }
 
-func testUpdate(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testUpdate(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Update existing entity", func(t *testing.T) {
 		user := NewTestUser(1, "Jane Doe", "jane@example.com")
 		err := repo.Save(ctx, user)
@@ -185,7 +185,7 @@ func testUpdate(t *testing.T, repo contracts.TransactionalRepository[TestUser, I
 	})
 }
 
-func testFindAll(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testFindAll(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("FindAll", func(t *testing.T) {
 		users := []TestUser{
 			NewTestUser(2, "Alice", "alice@example.com"),
@@ -210,7 +210,7 @@ func testFindAll(t *testing.T, repo contracts.TransactionalRepository[TestUser, 
 	})
 }
 
-func testFindBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testFindBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("FindBy", func(t *testing.T) {
 		users, err := repo.FindBy(ctx, map[string]interface{}{
 			"name": "Jane Doe",
@@ -244,7 +244,7 @@ func testFindBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, I
 	})
 }
 
-func testCount(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testCount(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Count", func(t *testing.T) {
 		count, err := repo.Count(ctx, map[string]interface{}{})
 		if err != nil {
@@ -266,7 +266,7 @@ func testCount(t *testing.T, repo contracts.TransactionalRepository[TestUser, In
 	})
 }
 
-func testDelete(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testDelete(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Delete", func(t *testing.T) {
 		id := NewIntID(2)
 		err := repo.Delete(ctx, id)
@@ -295,7 +295,7 @@ func testDelete(t *testing.T, repo contracts.TransactionalRepository[TestUser, I
 	})
 }
 
-func testDeleteBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testDeleteBy(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("DeleteBy", func(t *testing.T) {
 		user := NewTestUser(4, "Test User", "test@example.com")
 		err := repo.Save(ctx, user)
@@ -322,7 +322,7 @@ func testDeleteBy(t *testing.T, repo contracts.TransactionalRepository[TestUser,
 	})
 }
 
-func testInvalidOperations(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testInvalidOperations(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Save with invalid ID", func(t *testing.T) {
 		user := TestUser{
 			id:    NewIntID(0),
@@ -348,7 +348,7 @@ func TestSimpleRepositoryWithTransaction(t *testing.T) {
 	setupUsersTable(t, sqlDB)
 
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 
 	ctx := context.Background()
 
@@ -356,7 +356,7 @@ func TestSimpleRepositoryWithTransaction(t *testing.T) {
 	testSimpleRepoTransactionRollback(t, database, repo, ctx)
 }
 
-func testSimpleRepoTransactionCommit(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testSimpleRepoTransactionCommit(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Transaction commit", func(t *testing.T) {
 		tx, err := database.BeginTx(ctx)
 		if err != nil {
@@ -386,7 +386,7 @@ func testSimpleRepoTransactionCommit(t *testing.T, database contracts.Database, 
 	})
 }
 
-func testSimpleRepoTransactionRollback(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testSimpleRepoTransactionRollback(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Transaction rollback", func(t *testing.T) {
 		tx, err := database.BeginTx(ctx)
 		if err != nil {

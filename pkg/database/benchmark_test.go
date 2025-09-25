@@ -19,7 +19,7 @@ func BenchmarkSimpleRepository(b *testing.B) {
 
 	sqlDB := database.(*sqlDatabase).db
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 	ctx := context.Background()
 
 	benchmarkSave(b, repo, ctx)
@@ -30,7 +30,7 @@ func BenchmarkSimpleRepository(b *testing.B) {
 	benchmarkCount(b, repo, ctx)
 }
 
-func benchmarkSave(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func benchmarkSave(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	b.Run("Save", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -43,7 +43,7 @@ func benchmarkSave(b *testing.B, repo contracts.TransactionalRepository[TestUser
 	})
 }
 
-func setupBenchmarkUsers(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) []TestUser {
+func setupBenchmarkUsers(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) []TestUser {
 	setupUsers := make([]TestUser, 1000)
 	for i := 0; i < 1000; i++ {
 		user := NewTestUser(int64(i+10000), fmt.Sprintf("Setup User %d", i), fmt.Sprintf("setup%d@example.com", i))
@@ -56,7 +56,7 @@ func setupBenchmarkUsers(b *testing.B, repo contracts.TransactionalRepository[Te
 	return setupUsers
 }
 
-func benchmarkFind(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser) {
+func benchmarkFind(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context, setupUsers []TestUser) {
 	b.Run("Find", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -69,7 +69,7 @@ func benchmarkFind(b *testing.B, repo contracts.TransactionalRepository[TestUser
 	})
 }
 
-func benchmarkFindAll(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func benchmarkFindAll(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	b.Run("FindAll", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -81,7 +81,7 @@ func benchmarkFindAll(b *testing.B, repo contracts.TransactionalRepository[TestU
 	})
 }
 
-func benchmarkExists(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser) {
+func benchmarkExists(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context, setupUsers []TestUser) {
 	b.Run("Exists", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -94,7 +94,7 @@ func benchmarkExists(b *testing.B, repo contracts.TransactionalRepository[TestUs
 	})
 }
 
-func benchmarkCount(b *testing.B, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func benchmarkCount(b *testing.B, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	b.Run("Count", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -139,7 +139,7 @@ func benchmarkStrategies(b *testing.B, sqlDB *sql.DB, mapper *TestUserStrategyMa
 	}
 
 	for _, strategy := range strategies {
-		repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper, strategy)
+		repo := NewStrategyRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper, strategy)
 
 		for _, user := range setupUsers {
 			if err := repo.Save(ctx, user); err != nil {
@@ -152,7 +152,7 @@ func benchmarkStrategies(b *testing.B, sqlDB *sql.DB, mapper *TestUserStrategyMa
 	}
 }
 
-func benchmarkStrategyFind(b *testing.B, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context, setupUsers []TestUser, strategy contracts.LoadingStrategy) {
+func benchmarkStrategyFind(b *testing.B, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context, setupUsers []TestUser, strategy contracts.LoadingStrategy) {
 	b.Run(fmt.Sprintf("Find_%s", strategy), func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -165,7 +165,7 @@ func benchmarkStrategyFind(b *testing.B, repo contracts.StrategyRepository[TestU
 	})
 }
 
-func benchmarkStrategyFindAll(b *testing.B, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context, strategy contracts.LoadingStrategy) {
+func benchmarkStrategyFindAll(b *testing.B, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context, strategy contracts.LoadingStrategy) {
 	b.Run(fmt.Sprintf("FindAll_%s", strategy), func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

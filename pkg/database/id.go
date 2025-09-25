@@ -14,16 +14,16 @@ type UUID struct {
 
 var _ contracts.ID = UUID{}
 
-func NewUUID() UUID {
+func NewUUID() contracts.ID {
 	return UUID{value: uuid.New()}
 }
 
-func ParseUUID(s string) (UUID, error) {
+func ParseUUID(s string) (contracts.ID, error) {
 	val, err := uuid.Parse(s)
 	return UUID{value: val}, err
 }
 
-func MustParseUUID(s string) UUID {
+func MustParseUUID(s string) contracts.ID {
 	val, err := uuid.Parse(s)
 	if err != nil {
 		panic(err)
@@ -49,16 +49,16 @@ type IntID struct {
 
 var _ contracts.ID = IntID{}
 
-func NewIntID(v int64) IntID {
+func NewIntID(v int64) contracts.ID {
 	return IntID{value: v}
 }
 
-func ParseIntID(s string) (IntID, error) {
+func ParseIntID(s string) (contracts.ID, error) {
 	val, err := strconv.ParseInt(s, 10, 64)
 	return IntID{value: val}, err
 }
 
-func MustParseIntID(s string) IntID {
+func MustParseIntID(s string) contracts.ID {
 	val, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		panic(err)
@@ -84,7 +84,7 @@ type StringID struct {
 
 var _ contracts.ID = StringID{}
 
-func NewStringID(v string) StringID {
+func NewStringID(v string) contracts.ID {
 	return StringID{value: v}
 }
 

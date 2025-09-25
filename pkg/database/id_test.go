@@ -71,7 +71,7 @@ func TestUUID(t *testing.T) {
 
 func TestIntID(t *testing.T) {
 	t.Run("NewIntID", func(t *testing.T) {
-		id := NewIntID(123)
+		id := NewIntID(123).(IntID)
 		if !id.IsValid() {
 			t.Error("positive IntID should be valid")
 		}
@@ -94,10 +94,12 @@ func TestIntID(t *testing.T) {
 	})
 
 	t.Run("ParseIntID", func(t *testing.T) {
-		id, err := ParseIntID("456")
+		contractId, err := ParseIntID("456")
 		if err != nil {
 			t.Errorf("failed to parse valid IntID: %v", err)
 		}
+
+		id := contractId.(IntID)
 		if id.Int64() != 456 {
 			t.Errorf("expected 456, got %d", id.Int64())
 		}
@@ -109,7 +111,7 @@ func TestIntID(t *testing.T) {
 	})
 
 	t.Run("MustParseIntID", func(t *testing.T) {
-		id := MustParseIntID("789")
+		id := MustParseIntID("789").(IntID)
 		if id.Int64() != 789 {
 			t.Errorf("expected 789, got %d", id.Int64())
 		}

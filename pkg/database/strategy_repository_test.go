@@ -166,11 +166,11 @@ func (m *TestUserStrategyMapper) FindByBatch(ctx context.Context, db QueryExecut
 func (m *TestUserStrategyMapper) SaveWithRelations(ctx context.Context, db QueryExecutor, memento TestUserMemento, isUpdate bool) error {
 	if isUpdate {
 		query := "UPDATE users SET name = ?, email = ? WHERE id = ?"
-		_, err := db.ExecContext(ctx, query, memento.Name, memento.Email, memento.ID.Int64())
+		_, err := db.ExecContext(ctx, query, memento.Name, memento.Email, memento.ID.String())
 		return err
 	} else {
 		query := "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
-		_, err := db.ExecContext(ctx, query, memento.ID.Int64(), memento.Name, memento.Email)
+		_, err := db.ExecContext(ctx, query, memento.ID.String(), memento.Name, memento.Email)
 		return err
 	}
 }
@@ -190,7 +190,7 @@ func TestStrategyRepository(t *testing.T) {
 	}()
 
 	mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
-	repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](
+	repo := NewStrategyRepository[TestUser, contracts.ID, TestUserMemento](
 		db, mapper, contracts.LoadingStrategyMultiple)
 
 	ctx := context.Background()
@@ -206,7 +206,7 @@ func TestStrategyRepository(t *testing.T) {
 	testErrorHandlingForNonExistingEntity(t, repo, ctx)
 }
 
-func testDefaultStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID]) {
+func testDefaultStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID]) {
 	t.Run("Default strategy", func(t *testing.T) {
 		strategy := repo.GetStrategy()
 		if strategy != contracts.LoadingStrategyMultiple {
@@ -215,7 +215,7 @@ func testDefaultStrategy(t *testing.T, repo contracts.StrategyRepository[TestUse
 	})
 }
 
-func testWithStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testWithStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("WithStrategy", func(t *testing.T) {
 		joinRepo := repo.WithStrategy(contracts.LoadingStrategyJoin)
 
@@ -231,7 +231,7 @@ func testWithStrategy(t *testing.T, repo contracts.StrategyRepository[TestUser, 
 	})
 }
 
-func testFindWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testFindWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Find with different strategies", func(t *testing.T) {
 		user := NewTestUser(2, "Multi Strategy", "multi@example.com")
 		err := repo.Save(ctx, user)
@@ -261,7 +261,7 @@ func testFindWithDifferentStrategies(t *testing.T, repo contracts.StrategyReposi
 	})
 }
 
-func testFindAllWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testFindAllWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("FindAll with different strategies", func(t *testing.T) {
 		users := []TestUser{
 			NewTestUser(3, "User A", "a@example.com"),
@@ -297,7 +297,7 @@ func testFindAllWithDifferentStrategies(t *testing.T, repo contracts.StrategyRep
 	})
 }
 
-func testFindByWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testFindByWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("FindBy with different strategies", func(t *testing.T) {
 		strategies := []contracts.LoadingStrategy{
 			contracts.LoadingStrategyMultiple,
@@ -326,7 +326,7 @@ func testFindByWithDifferentStrategies(t *testing.T, repo contracts.StrategyRepo
 	})
 }
 
-func testSaveAndDeleteWithRelations(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testSaveAndDeleteWithRelations(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Save and Delete with relations", func(t *testing.T) {
 		user := NewTestUser(5, "Relations Test", "relations@example.com")
 
@@ -370,7 +370,7 @@ func testTransactionSupport(t *testing.T, mapper *TestUserStrategyMapper, ctx co
 		sqlDB := database.(*sqlDatabase).db
 		setupUsersTable(t, sqlDB)
 
-		strategyRepo := NewStrategyRepository[TestUser, IntID, TestUserMemento](
+		strategyRepo := NewStrategyRepository[TestUser, contracts.ID, TestUserMemento](
 			sqlDB, mapper, contracts.LoadingStrategyMultiple)
 
 		tx, err := database.BeginTx(ctx)
@@ -401,7 +401,7 @@ func testTransactionSupport(t *testing.T, mapper *TestUserStrategyMapper, ctx co
 	})
 }
 
-func testInvalidIDHandling(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testInvalidIDHandling(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Invalid ID handling", func(t *testing.T) {
 		user := TestUser{
 			id:    NewIntID(0),
@@ -416,7 +416,7 @@ func testInvalidIDHandling(t *testing.T, repo contracts.StrategyRepository[TestU
 	})
 }
 
-func testErrorHandlingForNonExistingEntity(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testErrorHandlingForNonExistingEntity(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Error handling for non-existing entity", func(t *testing.T) {
 		nonExistingID := NewIntID(999)
 
@@ -441,7 +441,7 @@ func TestStrategyRepositoryBatchOperations(t *testing.T) {
 	}()
 
 	mapper := &TestUserStrategyMapper{TestUserMapper: &TestUserMapper{}}
-	repo := NewStrategyRepository[TestUser, IntID, TestUserMemento](
+	repo := NewStrategyRepository[TestUser, contracts.ID, TestUserMemento](
 		db, mapper, contracts.LoadingStrategyBatch)
 
 	ctx := context.Background()
@@ -450,7 +450,7 @@ func TestStrategyRepositoryBatchOperations(t *testing.T) {
 	testBatchFindWithEmptyResult(t, repo, ctx)
 }
 
-func testBatchFindByIDs(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testBatchFindByIDs(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Batch find by IDs", func(t *testing.T) {
 		users := []TestUser{
 			NewTestUser(10, "Batch User 1", "batch1@example.com"),
@@ -475,7 +475,7 @@ func testBatchFindByIDs(t *testing.T, repo contracts.StrategyRepository[TestUser
 	})
 }
 
-func testBatchFindWithEmptyResult(t *testing.T, repo contracts.StrategyRepository[TestUser, IntID], ctx context.Context) {
+func testBatchFindWithEmptyResult(t *testing.T, repo contracts.StrategyRepository[TestUser, contracts.ID], ctx context.Context) {
 	t.Run("Batch find with empty result", func(t *testing.T) {
 		_, err := repo.Find(ctx, NewIntID(999))
 		if err == nil {

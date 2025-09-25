@@ -44,13 +44,13 @@ func testCompleteWorkflow(t *testing.T, database contracts.Database, ctx context
 
 	sqlDB := database.(*sqlDatabase).db
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 
 	testUserOperations(t, repo, ctx)
 	testIntegrationMigrationStatus(t, database)
 }
 
-func testUserOperations(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testUserOperations(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	user := NewTestUser(1, "Integration User", "integration@example.com")
 
 	err := repo.Save(ctx, user)
@@ -108,13 +108,13 @@ func testIntegrationMigrationStatus(t *testing.T, database contracts.Database) {
 func testTransactionWorkflow(t *testing.T, database contracts.Database, ctx context.Context) {
 	sqlDB := database.(*sqlDatabase).db
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 
 	testTransactionCommit(t, database, repo, ctx)
 	testTransactionRollback(t, database, repo, ctx)
 }
 
-func testTransactionCommit(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testTransactionCommit(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	tx, err := database.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
@@ -151,7 +151,7 @@ func testTransactionCommit(t *testing.T, database contracts.Database, repo contr
 	}
 }
 
-func testTransactionRollback(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID], ctx context.Context) {
+func testTransactionRollback(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, contracts.ID], ctx context.Context) {
 	tx, err := database.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("failed to begin rollback transaction: %v", err)
@@ -280,7 +280,7 @@ func testNonExistentTable(t *testing.T) {
 
 		sqlDB := database.(*sqlDatabase).db
 		mapper := &TestUserMapper{}
-		repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+		repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 
 		ctx := context.Background()
 		user := NewTestUser(1, "Test User", "test@example.com")
@@ -327,13 +327,13 @@ func TestConcurrentDatabaseOperations(t *testing.T) {
 
 	sqlDB := database.(*sqlDatabase).db
 	mapper := &TestUserMapper{}
-	repo := NewSimpleRepository[TestUser, IntID, TestUserMemento](sqlDB, mapper)
+	repo := NewSimpleRepository[TestUser, contracts.ID, TestUserMemento](sqlDB, mapper)
 
 	testConcurrentSaves(t, repo)
 	testConcurrentTransactions(t, database, repo)
 }
 
-func testConcurrentSaves(t *testing.T, repo contracts.TransactionalRepository[TestUser, IntID]) {
+func testConcurrentSaves(t *testing.T, repo contracts.TransactionalRepository[TestUser, contracts.ID]) {
 	t.Run("Concurrent saves", func(t *testing.T) {
 		const numGoroutines = 10
 		errChan := make(chan error, numGoroutines)
@@ -364,7 +364,7 @@ func testConcurrentSaves(t *testing.T, repo contracts.TransactionalRepository[Te
 	})
 }
 
-func testConcurrentTransactions(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, IntID]) {
+func testConcurrentTransactions(t *testing.T, database contracts.Database, repo contracts.TransactionalRepository[TestUser, contracts.ID]) {
 	t.Run("Concurrent transactions", func(t *testing.T) {
 		const numGoroutines = 5
 		errChan := make(chan error, numGoroutines)
