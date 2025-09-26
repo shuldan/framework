@@ -65,9 +65,12 @@ func (m *TestUserMapper) RestoreAggregate(memento TestUserMemento) TestUser {
 	}
 }
 
-func (m *TestUserMapper) ToColumns(memento TestUserMemento) (columns []string, values []interface{}) {
-	return []string{"id", "name", "email"},
-		[]interface{}{memento.ID.String(), memento.Name, memento.Email}
+func (m *TestUserMapper) GetColumns() []string {
+	return []string{"id", "name", "email"}
+}
+
+func (m *TestUserMapper) GetValues(memento TestUserMemento) []interface{} {
+	return []interface{}{memento.ID.String(), memento.Name, memento.Email}
 }
 
 func (m *TestUserMapper) FromRow(row *sql.Row) (TestUserMemento, error) {

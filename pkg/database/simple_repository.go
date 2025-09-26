@@ -38,8 +38,9 @@ func (r *simpleRepository[T, I, M]) getExecutor() QueryExecutor {
 func (r *simpleRepository[T, I, M]) Find(ctx context.Context, id I) (T, error) {
 	var zero T
 
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = ?",
-		r.tableName, r.mapper.IDColumn())
+	columns := r.mapper.GetColumns()
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = ?",
+		strings.Join(columns, ", "), r.tableName, r.mapper.IDColumn())
 
 	executor := r.getExecutor()
 	row := executor.QueryRowContext(ctx, query, id.String())
@@ -56,7 +57,9 @@ func (r *simpleRepository[T, I, M]) Find(ctx context.Context, id I) (T, error) {
 }
 
 func (r *simpleRepository[T, I, M]) FindAll(ctx context.Context, limit, offset int) ([]T, error) {
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT ? OFFSET ?", r.tableName)
+	columns := r.mapper.GetColumns()
+	query := fmt.Sprintf("SELECT %s FROM %s LIMIT ? OFFSET ?",
+		strings.Join(columns, ", "), r.tableName)
 
 	executor := r.getExecutor()
 	rows, err := executor.QueryContext(ctx, query, limit, offset)
@@ -102,8 +105,9 @@ func (r *simpleRepository[T, I, M]) FindBy(ctx context.Context, criteria map[str
 		i++
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-		r.tableName, strings.Join(conditions, " AND "))
+	columns := r.mapper.GetColumns()
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
+		strings.Join(columns, ", "), r.tableName, strings.Join(conditions, " AND "))
 
 	executor := r.getExecutor()
 	rows, err := executor.QueryContext(ctx, query, args...)
@@ -172,7 +176,8 @@ func (r *simpleRepository[T, I, M]) Count(ctx context.Context, criteria map[stri
 
 func (r *simpleRepository[T, I, M]) Save(ctx context.Context, aggregate T) error {
 	memento := r.mapper.CreateMemento(aggregate)
-	columns, values := r.mapper.ToColumns(memento)
+	columns := r.mapper.GetColumns()
+	values := r.mapper.GetValues(memento)
 	id := memento.GetID()
 
 	if !id.IsValid() {
@@ -206,24 +211,20 @@ func (r *simpleRepository[T, I, M]) Save(ctx context.Context, aggregate T) error
 		return err
 	} else {
 		var setParts []string
-		for _, col := range columns {
+		var updateValues []interface{}
+
+		for i, col := range columns {
 			if col != r.mapper.IDColumn() {
 				setParts = append(setParts, fmt.Sprintf("%s = ?", col))
+				updateValues = append(updateValues, values[i])
 			}
 		}
+		updateValues = append(updateValues, id.String())
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s = ?",
 			r.tableName,
 			strings.Join(setParts, ", "),
 			r.mapper.IDColumn())
-
-		updateValues := make([]interface{}, 0, len(values))
-		for i, col := range columns {
-			if col != r.mapper.IDColumn() {
-				updateValues = append(updateValues, values[i])
-			}
-		}
-		updateValues = append(updateValues, id.String())
 
 		_, err := executor.ExecContext(ctx, query, updateValues...)
 		return err

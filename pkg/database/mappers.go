@@ -12,7 +12,8 @@ type AggregateMapper[T contracts.Aggregate, M contracts.Memento] interface {
 	IDColumn() string
 	CreateMemento(aggregate T) M
 	RestoreAggregate(memento M) T
-	ToColumns(memento M) (columns []string, values []interface{})
+	GetColumns() []string
+	GetValues(memento M) []interface{}
 	FromRow(row *sql.Row) (M, error)
 	FromRows(rows *sql.Rows) (M, error)
 }
