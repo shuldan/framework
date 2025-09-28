@@ -127,7 +127,7 @@ func (m *TestUserStrategyMapper) buildFindByQuery(criteria map[string]interface{
 
 	i := 0
 	for field, value := range criteria {
-		if err := validateColumnName(field); err != nil {
+		if err := ValidateColumnName(field); err != nil {
 			return "", nil
 		}
 		conditions[i] = fmt.Sprintf("%s = ?", field)

@@ -168,7 +168,7 @@ func (r *strategyRepository[T, I, M]) Count(ctx context.Context, criteria map[st
 		conditions := make([]string, len(criteria))
 		i := 0
 		for field, value := range criteria {
-			if err := validateColumnName(field); err != nil {
+			if err := ValidateColumnName(field); err != nil {
 				return 0, err
 			}
 			conditions[i] = fmt.Sprintf("%s = ?", field)
@@ -223,7 +223,7 @@ func (r *strategyRepository[T, I, M]) DeleteBy(ctx context.Context, criteria map
 
 	i := 0
 	for field, value := range criteria {
-		if err := validateColumnName(field); err != nil {
+		if err := ValidateColumnName(field); err != nil {
 			return 0, err
 		}
 		conditions[i] = fmt.Sprintf("%s = ?", field)

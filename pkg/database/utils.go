@@ -218,7 +218,7 @@ func FromNullTime(nt sql.NullTime) time.Time {
 
 var validColumnPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-func validateColumnName(name string) error {
+func ValidateColumnName(name string) error {
 	if !validColumnPattern.MatchString(name) {
 		return ErrInvalidCriteria.WithDetail("reason", "invalid column name: "+name)
 	}

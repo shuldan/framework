@@ -435,7 +435,7 @@ func testValidColumnNames(t *testing.T) {
 
 	for _, tt := range validTests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateColumnName(tt.columnName)
+			err := ValidateColumnName(tt.columnName)
 			if err != nil {
 				t.Errorf("unexpected error for valid column name '%s': %v", tt.columnName, err)
 			}
@@ -458,7 +458,7 @@ func testInvalidColumnNames(t *testing.T) {
 
 	for _, tt := range invalidTests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateColumnName(tt.columnName)
+			err := ValidateColumnName(tt.columnName)
 			if err == nil {
 				t.Errorf("expected error for invalid column name '%s' but got none", tt.columnName)
 			}
