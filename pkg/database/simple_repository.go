@@ -53,7 +53,7 @@ func (r *simpleRepository[T, I, M]) Find(ctx context.Context, id I) (T, error) {
 		return zero, err
 	}
 
-	return r.mapper.RestoreAggregate(memento), nil
+	return r.mapper.RestoreAggregate(memento)
 }
 
 func (r *simpleRepository[T, I, M]) FindAll(ctx context.Context, limit, offset int) ([]T, error) {
@@ -80,7 +80,11 @@ func (r *simpleRepository[T, I, M]) FindAll(ctx context.Context, limit, offset i
 		if err != nil {
 			return nil, err
 		}
-		aggregate := r.mapper.RestoreAggregate(memento)
+		aggregate, err := r.mapper.RestoreAggregate(memento)
+		if err != nil {
+			return nil, err
+		}
+
 		aggregates = append(aggregates, aggregate)
 	}
 
@@ -128,7 +132,11 @@ func (r *simpleRepository[T, I, M]) FindBy(ctx context.Context, criteria map[str
 		if err != nil {
 			return nil, err
 		}
-		aggregate := r.mapper.RestoreAggregate(memento)
+		aggregate, err := r.mapper.RestoreAggregate(memento)
+		if err != nil {
+			return nil, err
+		}
+
 		aggregates = append(aggregates, aggregate)
 	}
 
@@ -175,7 +183,11 @@ func (r *simpleRepository[T, I, M]) Count(ctx context.Context, criteria map[stri
 }
 
 func (r *simpleRepository[T, I, M]) Save(ctx context.Context, aggregate T) error {
-	memento := r.mapper.CreateMemento(aggregate)
+	memento, err := r.mapper.CreateMemento(aggregate)
+	if err != nil {
+		return err
+	}
+
 	columns := r.mapper.GetColumns()
 	values := r.mapper.GetValues(memento)
 	id := memento.GetID()

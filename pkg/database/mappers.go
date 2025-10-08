@@ -10,8 +10,8 @@ import (
 type AggregateMapper[T contracts.Aggregate, M contracts.Memento] interface {
 	TableName() string
 	IDColumn() string
-	CreateMemento(aggregate T) M
-	RestoreAggregate(memento M) T
+	CreateMemento(aggregate T) (M, error)
+	RestoreAggregate(memento M) (T, error)
 	GetColumns() []string
 	GetValues(memento M) []interface{}
 	FromRow(row *sql.Row) (M, error)

@@ -49,20 +49,20 @@ func (m *TestUserMapper) IDColumn() string {
 	return "id"
 }
 
-func (m *TestUserMapper) CreateMemento(aggregate TestUser) TestUserMemento {
+func (m *TestUserMapper) CreateMemento(aggregate TestUser) (TestUserMemento, error) {
 	return TestUserMemento{
 		ID:    aggregate.id,
 		Name:  aggregate.name,
 		Email: aggregate.email,
-	}
+	}, nil
 }
 
-func (m *TestUserMapper) RestoreAggregate(memento TestUserMemento) TestUser {
+func (m *TestUserMapper) RestoreAggregate(memento TestUserMemento) (TestUser, error) {
 	return TestUser{
 		id:    memento.ID,
 		name:  memento.Name,
 		email: memento.Email,
-	}
+	}, nil
 }
 
 func (m *TestUserMapper) GetColumns() []string {

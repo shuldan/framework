@@ -85,7 +85,7 @@ func (r *strategyRepository[T, I, M]) Find(ctx context.Context, id I) (T, error)
 		return zero, err
 	}
 
-	return r.mapper.RestoreAggregate(memento), nil
+	return r.mapper.RestoreAggregate(memento)
 }
 
 func (r *strategyRepository[T, I, M]) FindAll(ctx context.Context, limit, offset int) ([]T, error) {
@@ -111,7 +111,12 @@ func (r *strategyRepository[T, I, M]) FindAll(ctx context.Context, limit, offset
 
 	aggregates := make([]T, len(mementos))
 	for i, memento := range mementos {
-		aggregates[i] = r.mapper.RestoreAggregate(memento)
+		aggregate, err := r.mapper.RestoreAggregate(memento)
+		if err != nil {
+			return nil, err
+		}
+
+		aggregates[i] = aggregate
 	}
 
 	return aggregates, nil
@@ -140,7 +145,12 @@ func (r *strategyRepository[T, I, M]) FindBy(ctx context.Context, criteria map[s
 
 	aggregates := make([]T, len(mementos))
 	for i, memento := range mementos {
-		aggregates[i] = r.mapper.RestoreAggregate(memento)
+		aggregate, err := r.mapper.RestoreAggregate(memento)
+		if err != nil {
+			return nil, err
+		}
+
+		aggregates[i] = aggregate
 	}
 
 	return aggregates, nil
@@ -186,7 +196,11 @@ func (r *strategyRepository[T, I, M]) Count(ctx context.Context, criteria map[st
 }
 
 func (r *strategyRepository[T, I, M]) Save(ctx context.Context, aggregate T) error {
-	memento := r.mapper.CreateMemento(aggregate)
+	memento, err := r.mapper.CreateMemento(aggregate)
+	if err != nil {
+		return err
+	}
+
 	id := memento.GetID()
 
 	if !id.IsValid() {
