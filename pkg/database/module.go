@@ -116,6 +116,7 @@ func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, 
 		newMigrationUpCommand(m.pool, config, logger),
 		newMigrationDownCommand(m.pool, config, logger),
 		newMigrationStatusCommand(m.pool, config, logger),
+		newMigrationFreshCommand(m.pool, config, logger),
 	}, nil
 }
 

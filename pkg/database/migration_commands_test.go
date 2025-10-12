@@ -143,8 +143,6 @@ func (m *mockLogger) Critical(msg string, args ...any) {
 func (m *mockLogger) With(_ ...any) contracts.Logger { return m }
 
 func TestMigrationUpCommand(t *testing.T) {
-	t.Parallel()
-
 	testUpCommandName(t)
 	testUpCommandDescription(t)
 	testUpCommandGroup(t)
@@ -375,8 +373,6 @@ func testUpCommandWithMigrationErrors(t *testing.T) {
 }
 
 func TestMigrationDownCommand(t *testing.T) {
-	t.Parallel()
-
 	testDownCommandBasics(t)
 	testDownCommandConfiguration(t)
 	testDownCommandExecution(t)
@@ -574,8 +570,6 @@ func testDownCommandWithMultipleSteps(t *testing.T) {
 }
 
 func TestMigrationStatusCommand(t *testing.T) {
-	t.Parallel()
-
 	testStatusCommandBasics(t)
 	testStatusCommandExecute(t)
 	testStatusCommandWithMultipleConnections(t)

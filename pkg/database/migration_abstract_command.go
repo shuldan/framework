@@ -22,6 +22,9 @@ func (c *migrationAbstractCommand) processAllConnections(_ contracts.CliContext,
 	var errs []error
 
 	for _, connectionName := range c.pool.getConnectionNames() {
+		if c.connectionName != "" && c.connectionName != connectionName {
+			continue
+		}
 		db, ok := c.pool.getDatabase(connectionName)
 		if !ok {
 			continue

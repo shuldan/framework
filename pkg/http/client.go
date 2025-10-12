@@ -191,10 +191,13 @@ func (c *httpClient) processResponse(resp *http.Response, req contracts.HTTPRequ
 
 func (c *httpClient) waitForRetry(ctx context.Context, attempt int, url string) error {
 	waitTime := c.calculateRetryWait(attempt)
-	c.logger.Debug("Retrying HTTP request",
-		"attempt", attempt,
-		"wait_time", waitTime,
-		"url", url)
+	if c.logger != nil {
+		c.logger.Debug("Retrying HTTP request",
+			"attempt", attempt,
+			"wait_time", waitTime,
+			"url", url,
+		)
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

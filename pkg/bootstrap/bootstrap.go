@@ -17,15 +17,15 @@ import (
 type Bootstrap struct {
 	appName         string
 	appVersion      string
-	appEnv          string
+	appEnvironment  string
 	modules         []contracts.AppModule
 	gracefulTimeout time.Duration
 }
 
 func New(appName string, appVersion string, envPrefix string, configPaths ...string) *Bootstrap {
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "" {
-		appEnv = "development"
+	appEnvironment := os.Getenv("APP_ENVIRONMENT")
+	if appEnvironment == "" {
+		appEnvironment = "development"
 	}
 
 	configModule := config.NewModule(envPrefix, configPaths...)
@@ -37,7 +37,7 @@ func New(appName string, appVersion string, envPrefix string, configPaths ...str
 	return &Bootstrap{
 		appName:         appName,
 		appVersion:      appVersion,
-		appEnv:          appEnv,
+		appEnvironment:  appEnvironment,
 		modules:         modules,
 		gracefulTimeout: 30 * time.Second,
 	}
@@ -88,7 +88,7 @@ func (b *Bootstrap) CreateApp() (contracts.App, error) {
 		app.Info{
 			AppName:     b.appName,
 			Version:     b.appVersion,
-			Environment: "",
+			Environment: b.appEnvironment,
 		},
 		app.NewContainer(),
 		app.NewRegistry(),
