@@ -114,7 +114,7 @@ func (h *errorHandler) Handle(ctx context.Context, err error) error {
 		h.logger.Error("HTTP context not found in error handler", "error", err.Error())
 		return err
 	}
-	if httpCtx.StatusCode() != 0 {
+	if h.isResponseSent(httpCtx) {
 		h.logger.Warn("Response already sent, cannot handle error",
 			"error", err.Error(),
 			"status_code", httpCtx.StatusCode(),
@@ -164,6 +164,14 @@ func (h *errorHandler) Handle(ctx context.Context, err error) error {
 		return jsonErr
 	}
 	return nil
+}
+
+func (h *errorHandler) isResponseSent(ctx contracts.HTTPContext) bool {
+	httpCtx, ok := ctx.(*httpContext)
+	if !ok {
+		return false
+	}
+	return httpCtx.responseSent
 }
 
 func (h *errorHandler) determineErrorType(err error) (string, int) {

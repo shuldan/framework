@@ -2,7 +2,6 @@ package http
 
 import (
 	"crypto/tls"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
+	"github.com/shuldan/framework/pkg/errors"
 )
 
 func TestMiddlewares(t *testing.T) {
@@ -206,7 +206,7 @@ func TestErrorHandlerMiddleware(t *testing.T) {
 	middleware := ErrorHandlerMiddleware(errorHandler)
 
 	handler := func(ctx contracts.HTTPContext) error {
-		return errors.New("test error")
+		return errors.ErrInternal
 	}
 
 	wrappedHandler := middleware(handler)
