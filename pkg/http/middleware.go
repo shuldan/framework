@@ -94,11 +94,10 @@ func loadLoggingMiddleware(sub contracts.Config, logger contracts.Logger) contra
 
 func loadErrorHandlerMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if errSub, ok := sub.GetSub("error_handler"); ok && errSub.GetBool("enabled", false) {
-		cfg := &ErrorHandlerConfig{
-			showStackTrace: errSub.GetBool("show_stack_trace", false),
-			showDetails:    errSub.GetBool("show_details", false),
-			logLevel:       errSub.GetString("log_level", "error"),
-		}
+		cfg := NewErrorHandlerConfig().
+			WithShowStackTrace(errSub.GetBool("show_stack_trace", false)).
+			WithShowDetails(errSub.GetBool("show_details", false)).
+			WithLogLevel(errSub.GetString("log_level", "error"))
 
 		if statusSub, ok := errSub.GetSub("status_codes"); ok {
 			statusMap := make(map[string]int)
