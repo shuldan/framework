@@ -134,7 +134,6 @@ func (h *errorHandler) Handle(ctx context.Context, err error) error {
 	if statusCode == http.StatusBadRequest {
 		httpCtx.SetHeader("X-Validation-Error", "true")
 	}
-	httpCtx.Status(statusCode)
 	response := map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":       errorType,
@@ -156,7 +155,7 @@ func (h *errorHandler) Handle(ctx context.Context, err error) error {
 	if statusCode == http.StatusTooManyRequests {
 		httpCtx.SetHeader("Retry-After", "60")
 	}
-	if jsonErr := httpCtx.JSON(response); jsonErr != nil {
+	if jsonErr := httpCtx.Status(statusCode).JSON(response); jsonErr != nil {
 		h.logger.Error("Failed to send error response",
 			"json_error", jsonErr.Error(),
 			"original_error", err.Error(),
