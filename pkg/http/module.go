@@ -174,13 +174,9 @@ func registerRouter(container contracts.DIContainer) error {
 
 	router := NewRouter(loggerInst)
 	middlewares := LoadMiddlewareFromConfig(configInst, loggerInst)
-	for _, mw := range middlewares {
-		router.Use(mw)
-	}
+	router.Use(middlewares...)
 
-	return container.Factory(contracts.HTTPRouterModuleName, func(c contracts.DIContainer) (interface{}, error) {
-		return router, nil
-	})
+	return container.Instance(contracts.HTTPRouterModuleName, router)
 }
 
 func registerServer(container contracts.DIContainer) error {
@@ -219,7 +215,10 @@ func registerServer(container contracts.DIContainer) error {
 		}
 	}
 
-	return container.Factory(contracts.HTTPServerModuleName, func(c contracts.DIContainer) (interface{}, error) {
-		return NewServer(routerInst, loggerInst, options...)
-	})
+	server, err := NewServer(routerInst, loggerInst, options...)
+	if err != nil {
+		return err
+	}
+
+	return container.Instance(contracts.HTTPServerModuleName, server)
 }
