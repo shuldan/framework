@@ -73,6 +73,16 @@ func (c *ErrorHandlerConfig) WithShowDetails(show bool) *ErrorHandlerConfig {
 	return c
 }
 
+func (c *ErrorHandlerConfig) WithStatusCodes(codeMap map[string]int) *ErrorHandlerConfig {
+	c.statusCodeMap = codeMap
+	return c
+}
+
+func (c *ErrorHandlerConfig) WithUserMessages(msgMap map[string]string) *ErrorHandlerConfig {
+	c.userMessageMap = msgMap
+	return c
+}
+
 func (c *ErrorHandlerConfig) StatusCodeMap() map[string]int {
 	return c.statusCodeMap
 }
@@ -181,7 +191,6 @@ func (h *errorHandler) determineErrorType(err error) (string, int) {
 	code := errors.GetErrorCode(err)
 	if code != "" {
 		status := h.config.StatusCodeMap()[string(code)]
-		h.logger.Debug("Error status code", "code", code, "status_code", status)
 		if status == 0 {
 			status = http.StatusInternalServerError
 		}
@@ -191,14 +200,11 @@ func (h *errorHandler) determineErrorType(err error) (string, int) {
 	if parts := strings.SplitN(err.Error(), ":", 2); len(parts) > 1 {
 		errorCode := parts[0]
 		status := h.config.StatusCodeMap()[errorCode]
-		h.logger.Debug("Partial error status code", "code", errorCode, "status_code", status)
 		if status == 0 {
 			status = http.StatusInternalServerError
 		}
 		return errorCode, status
 	}
-
-	h.logger.Debug("Unknown error type")
 
 	return string(errors.ErrInternal.Code), http.StatusInternalServerError
 }

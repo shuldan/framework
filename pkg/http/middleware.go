@@ -39,7 +39,7 @@ func LoadMiddlewareFromConfig(config contracts.Config, logger contracts.Logger) 
 
 func loadSecurityHeadersMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if secSub, ok := sub.GetSub("security_headers"); ok && secSub.GetBool("enabled", true) {
-		logger.Debug("Security headers middleware enabled")
+		logger.Info("Security headers middleware enabled")
 		cfg := securityHeadersConfig{
 			enabled:        true,
 			csp:            secSub.GetString("csp", "default-src 'self';"),
@@ -54,7 +54,7 @@ func loadSecurityHeadersMiddleware(sub contracts.Config, logger contracts.Logger
 
 func loadHSTSMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if hstsSub, ok := sub.GetSub("hsts"); ok && hstsSub.GetBool("enabled", false) {
-		logger.Debug("HSTS middleware enabled")
+		logger.Info("HSTS middleware enabled")
 		maxAge := time.Duration(hstsSub.GetInt("max_age", 31536000)) * time.Second
 		cfg := hstsConfig{
 			enabled:           true,
@@ -69,7 +69,7 @@ func loadHSTSMiddleware(sub contracts.Config, logger contracts.Logger) contracts
 
 func loadCORSMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if corsSub, ok := sub.GetSub("cors"); ok && corsSub.GetBool("enabled", false) {
-		logger.Debug("CORS middleware enabled")
+		logger.Info("CORS middleware enabled")
 		cfg := CORSConfig{
 			AllowOrigins:     corsSub.GetStringSlice("allow_origins"),
 			AllowMethods:     corsSub.GetStringSlice("allow_methods"),
@@ -90,7 +90,7 @@ func loadCORSMiddleware(sub contracts.Config, logger contracts.Logger) contracts
 
 func loadLoggingMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if logSub, ok := sub.GetSub("logging"); ok && logSub.GetBool("enabled", false) {
-		logger.Debug("Logging middleware enabled")
+		logger.Info("Logging middleware enabled")
 		return LoggingMiddleware(logger)
 	}
 	return nil
@@ -98,7 +98,7 @@ func loadLoggingMiddleware(sub contracts.Config, logger contracts.Logger) contra
 
 func loadErrorHandlerMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
 	if errSub, ok := sub.GetSub("error_handler"); ok && errSub.GetBool("enabled", false) {
-		logger.Debug("Error handler middleware enabled")
+		logger.Info("Error handler middleware enabled")
 		cfg := NewErrorHandlerConfig().
 			WithShowStackTrace(errSub.GetBool("show_stack_trace", false)).
 			WithShowDetails(errSub.GetBool("show_details", false)).
@@ -106,22 +106,18 @@ func loadErrorHandlerMiddleware(sub contracts.Config, logger contracts.Logger) c
 
 		if statusSub, ok := errSub.GetSub("status_codes"); ok {
 			statusMap := make(map[string]int)
-			for code, val := range statusSub.All() {
-				if statusCode, ok := val.(int); ok {
-					statusMap[code] = statusCode
-				}
+			for code := range statusSub.All() {
+				statusMap[code] = statusSub.GetInt(code)
 			}
-			cfg.statusCodeMap = statusMap
+			cfg = cfg.WithStatusCodes(statusMap)
 		}
 
 		if msgSub, ok := errSub.GetSub("user_messages"); ok {
 			msgMap := make(map[string]string)
-			for code, msg := range msgSub.All() {
-				if message, ok := msg.(string); ok {
-					msgMap[code] = message
-				}
+			for code := range msgSub.All() {
+				msgMap[code] = msgSub.GetString(code)
 			}
-			cfg.userMessageMap = msgMap
+			cfg = cfg.WithUserMessages(msgMap)
 		}
 
 		return ErrorHandlerMiddleware(NewErrorHandler(cfg, logger))
