@@ -84,7 +84,7 @@ func (b *Bootstrap) WithHTTPServer() *Bootstrap {
 	return b
 }
 
-func (b *Bootstrap) WithQueueBrock() *Bootstrap {
+func (b *Bootstrap) WithQueueBroker() *Bootstrap {
 	m := broker.NewModule()
 	b.modules = append(b.modules, m)
 	return b
