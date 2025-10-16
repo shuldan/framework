@@ -12,6 +12,7 @@ import (
 	"github.com/shuldan/framework/pkg/events"
 	"github.com/shuldan/framework/pkg/http"
 	"github.com/shuldan/framework/pkg/logger"
+	"github.com/shuldan/framework/pkg/queue/broker"
 )
 
 type Bootstrap struct {
@@ -79,6 +80,12 @@ func (b *Bootstrap) WithHTTPClient() *Bootstrap {
 
 func (b *Bootstrap) WithHTTPServer() *Bootstrap {
 	m := http.NewServerModule()
+	b.modules = append(b.modules, m)
+	return b
+}
+
+func (b *Bootstrap) WithQueueBrock() *Bootstrap {
+	m := broker.NewModule()
 	b.modules = append(b.modules, m)
 	return b
 }
