@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-type IQueueMessage interface {
+type QueueMessage interface {
 	ID() string
 	Body() []byte
 	Headers() map[string]interface{}
@@ -12,26 +12,26 @@ type IQueueMessage interface {
 	Nack(requeue bool) error
 }
 
-type IQueueProducer interface {
+type QueueProducer interface {
 	Publish(ctx context.Context, message []byte, headers map[string]interface{}) error
 }
 
-type IQueueProcessor interface {
-	Process(ctx context.Context, msg IQueueMessage) error
+type QueueProcessor interface {
+	Process(ctx context.Context, msg QueueMessage) error
 }
 
-type IQueueConsumer interface {
-	Consume(ctx context.Context, processor IQueueProcessor) error
+type QueueConsumer interface {
+	Consume(ctx context.Context, processor QueueProcessor) error
 }
 
-type IQueueManager interface {
+type QueueManager interface {
 	DeclareQueue(name string) error
 	DeleteQueue(name string) error
 }
 
-type IQueue interface {
-	IQueueProducer
-	IQueueConsumer
-	IQueueManager
+type Queue interface {
+	QueueProducer
+	QueueConsumer
+	QueueManager
 	Close() error
 }
