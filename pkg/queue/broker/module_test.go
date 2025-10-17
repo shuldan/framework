@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -18,13 +19,13 @@ func TestModule_Register_Success_MemoryDriver(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestModule_Register_Success_MemoryDriver(t *testing.T) {
 		t.Fatalf("Module registration failed: %v", err)
 	}
 
-	broker, err := container.Resolve(contracts.QueueBrokerModuleName)
+	broker, err := container.Resolve(reflect.TypeOf((*contracts.Broker)(nil)).Elem())
 	if err != nil {
 		t.Fatalf("Failed to resolve queue broker: %v", err)
 	}
@@ -74,13 +75,13 @@ func TestModule_Register_Success_RedisDriver(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestModule_Register_Success_RedisDriver(t *testing.T) {
 		t.Fatalf("Module registration failed: %v", err)
 	}
 
-	broker, err := container.Resolve(contracts.QueueBrokerModuleName)
+	broker, err := container.Resolve(reflect.TypeOf((*contracts.Broker)(nil)).Elem())
 	if err != nil {
 		t.Fatalf("Failed to resolve queue broker: %v", err)
 	}
@@ -106,13 +107,13 @@ func TestModule_Register_MissingConfig(t *testing.T) {
 
 	logger := &mockLogger{}
 
-	if err := container.Instance(contracts.LoggerModuleName, logger); err != nil {
+	if err := container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger); err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
 
 	config := &mockConfig{}
 
-	if err := container.Instance(contracts.ConfigModuleName, config); err != nil {
+	if err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config); err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
@@ -130,13 +131,13 @@ func TestModule_Register_InvalidConfigInstance(t *testing.T) {
 	container := newMockContainer()
 	module := NewModule()
 
-	err := container.Instance(contracts.ConfigModuleName, "invalid config")
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), "invalid config")
 	if err != nil {
 		t.Fatalf("Failed to register invalid config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -162,12 +163,12 @@ func TestModule_Register_InvalidLoggerInstance(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
-	err = container.Instance(contracts.LoggerModuleName, "invalid logger")
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), "invalid logger")
 	if err != nil {
 		t.Fatalf("Failed to register invalid logger: %v", err)
 	}
@@ -193,13 +194,13 @@ func TestModule_Register_MissingQueueConfig(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -225,13 +226,13 @@ func TestModule_Register_UnsupportedDriver(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -257,13 +258,13 @@ func TestModule_Register_RedisDriver_MissingRedisConfig(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -294,13 +295,13 @@ func TestModule_Register_RedisDriver_MissingClientConfig(t *testing.T) {
 			},
 		},
 	}
-	err := container.Instance(contracts.ConfigModuleName, config)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), config)
 	if err != nil {
 		t.Fatalf("Failed to register config: %v", err)
 	}
 
 	logger := &mockLogger{}
-	err = container.Instance(contracts.LoggerModuleName, logger)
+	err = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 	if err != nil {
 		t.Fatalf("Failed to register logger: %v", err)
 	}
@@ -312,15 +313,6 @@ func TestModule_Register_RedisDriver_MissingClientConfig(t *testing.T) {
 
 	if !errors.Is(err, ErrRedisClientNotConfigured) {
 		t.Errorf("Expected ErrRedisClientNotConfigured, got %v", err)
-	}
-}
-
-func TestModule_Name(t *testing.T) {
-	module := NewModule()
-	expectedName := contracts.QueueBrokerModuleName
-
-	if module.Name() != expectedName {
-		t.Errorf("Expected module name %s, got %s", expectedName, module.Name())
 	}
 }
 

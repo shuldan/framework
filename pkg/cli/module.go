@@ -2,9 +2,12 @@ package cli
 
 import (
 	"os"
+	"reflect"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
+
+const ModuleName = "cli"
 
 type module struct{}
 
@@ -13,12 +16,12 @@ func NewModule() contracts.AppModule {
 }
 
 func (m *module) Name() string {
-	return "cli"
+	return ModuleName
 }
 
 func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
-		contracts.CliModuleName,
+		reflect.TypeOf((*contracts.Cli)(nil)).Elem(),
 		func(c contracts.DIContainer) (interface{}, error) {
 			r := NewRegistry()
 			consoleInstance, err := New(r)
@@ -37,7 +40,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 }
 
 func (m *module) Start(ctx contracts.AppContext) error {
-	c, err := ctx.Container().Resolve(contracts.CliModuleName)
+	c, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Cli)(nil)).Elem())
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"sync"
 
 	"github.com/shuldan/framework/pkg/contracts"
@@ -8,72 +9,72 @@ import (
 
 type container struct {
 	mu        sync.RWMutex
-	factories map[string]func(c contracts.DIContainer) (interface{}, error)
-	instances map[string]interface{}
+	factories map[reflect.Type]func(c contracts.DIContainer) (interface{}, error)
+	instances map[reflect.Type]interface{}
 }
 
 func NewContainer() contracts.DIContainer {
 	return &container{
-		factories: make(map[string]func(c contracts.DIContainer) (interface{}, error)),
-		instances: make(map[string]interface{}),
+		factories: make(map[reflect.Type]func(c contracts.DIContainer) (interface{}, error)),
+		instances: make(map[reflect.Type]interface{}),
 	}
 }
 
-func (c *container) Has(name string) bool {
+func (c *container) Has(abstract reflect.Type) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	_, hasFactory := c.factories[name]
-	_, hasInstance := c.instances[name]
+	_, hasFactory := c.factories[abstract]
+	_, hasInstance := c.instances[abstract]
 	return hasFactory || hasInstance
 }
 
-func (c *container) Instance(name string, value interface{}) error {
+func (c *container) Instance(abstract reflect.Type, concrete interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, exists := c.instances[name]; exists {
-		return ErrDuplicateInstance.WithDetail("name", name)
+	if _, exists := c.instances[abstract]; exists {
+		return ErrDuplicateInstance.WithDetail("type", abstract.String())
 	}
-	c.instances[name] = value
+	c.instances[abstract] = concrete
 	return nil
 }
 
-func (c *container) Factory(name string, factory func(c contracts.DIContainer) (interface{}, error)) error {
+func (c *container) Factory(abstract reflect.Type, factory func(c contracts.DIContainer) (interface{}, error)) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, exists := c.factories[name]; exists {
-		return ErrDuplicateFactory.WithDetail("name", name)
+	if _, exists := c.factories[abstract]; exists {
+		return ErrDuplicateFactory.WithDetail("type", abstract.String())
 	}
-	c.factories[name] = factory
+	c.factories[abstract] = factory
 	return nil
 }
 
-func (c *container) Resolve(name string) (interface{}, error) {
-	return c.resolveWithStack(name, make(map[string]bool))
+func (c *container) Resolve(abstract reflect.Type) (interface{}, error) {
+	return c.resolveWithStack(abstract, make(map[reflect.Type]bool))
 }
 
-func (c *container) resolveWithStack(name string, resolving map[string]bool) (interface{}, error) {
+func (c *container) resolveWithStack(abstract reflect.Type, resolving map[reflect.Type]bool) (interface{}, error) {
 	c.mu.RLock()
-	if instance, exists := c.instances[name]; exists {
+	if instance, exists := c.instances[abstract]; exists {
 		c.mu.RUnlock()
 		return instance, nil
 	}
 	c.mu.RUnlock()
 
-	if resolving[name] {
-		return nil, ErrCircularDep.WithDetail("name", name)
+	if resolving[abstract] {
+		return nil, ErrCircularDep.WithDetail("type", abstract.String())
 	}
 
 	c.mu.RLock()
-	factory, exists := c.factories[name]
+	factory, exists := c.factories[abstract]
 	c.mu.RUnlock()
 
 	if !exists {
-		return nil, ErrValueNotFound.WithDetail("name", name)
+		return nil, ErrValueNotFound.WithDetail("type", abstract.String())
 	}
 
-	resolving[name] = true
+	resolving[abstract] = true
 	defer func() {
-		delete(resolving, name)
+		delete(resolving, abstract)
 	}()
 
 	proxy := &containerProxy{
@@ -89,34 +90,34 @@ func (c *container) resolveWithStack(name string, resolving map[string]bool) (in
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if existing, exists := c.instances[name]; exists {
+	if existing, exists := c.instances[abstract]; exists {
 		return existing, nil
 	}
 
-	c.instances[name] = instance
+	c.instances[abstract] = instance
 	return instance, nil
 }
 
 type containerProxy struct {
 	container contracts.DIContainer
-	resolving map[string]bool
+	resolving map[reflect.Type]bool
 }
 
-func (cp *containerProxy) Has(name string) bool {
-	return cp.container.Has(name)
+func (cp *containerProxy) Has(abstract reflect.Type) bool {
+	return cp.container.Has(abstract)
 }
 
-func (cp *containerProxy) Instance(name string, value interface{}) error {
-	return cp.container.Instance(name, value)
+func (cp *containerProxy) Instance(abstract reflect.Type, concrete interface{}) error {
+	return cp.container.Instance(abstract, concrete)
 }
 
-func (cp *containerProxy) Factory(name string, factory func(c contracts.DIContainer) (interface{}, error)) error {
-	return cp.container.Factory(name, factory)
+func (cp *containerProxy) Factory(abstract reflect.Type, factory func(c contracts.DIContainer) (interface{}, error)) error {
+	return cp.container.Factory(abstract, factory)
 }
 
-func (cp *containerProxy) Resolve(name string) (interface{}, error) {
+func (cp *containerProxy) Resolve(abstract reflect.Type) (interface{}, error) {
 	if containerImpl, ok := cp.container.(*container); ok {
-		return containerImpl.resolveWithStack(name, cp.resolving)
+		return containerImpl.resolveWithStack(abstract, cp.resolving)
 	}
-	return cp.container.Resolve(name)
+	return cp.container.Resolve(abstract)
 }

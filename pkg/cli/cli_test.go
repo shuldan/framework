@@ -7,10 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/shuldan/framework/pkg/app"
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
@@ -288,48 +291,59 @@ func TestConsole_Run_CommandExecutionFailure(t *testing.T) {
 	}
 }
 
-type mockDIContainer struct {
-	instances map[string]interface{}
-	factories map[string]func(contracts.DIContainer) (interface{}, error)
+type mockContainer struct {
+	mu        sync.RWMutex
+	instances map[reflect.Type]interface{}
+	factories map[reflect.Type]func(contracts.DIContainer) (interface{}, error)
 }
 
-func newMockDIContainer() *mockDIContainer {
-	return &mockDIContainer{
-		instances: make(map[string]interface{}),
-		factories: make(map[string]func(contracts.DIContainer) (interface{}, error)),
+func newMockContainer() *mockContainer {
+	return &mockContainer{
+		instances: make(map[reflect.Type]interface{}),
+		factories: make(map[reflect.Type]func(contracts.DIContainer) (interface{}, error)),
 	}
 }
 
-func (m *mockDIContainer) Has(name string) bool {
-	_, hasInstance := m.instances[name]
-	_, hasFactory := m.factories[name]
+func (m *mockContainer) Has(abstract reflect.Type) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, hasInstance := m.instances[abstract]
+	_, hasFactory := m.factories[abstract]
 	return hasInstance || hasFactory
 }
 
-func (m *mockDIContainer) Instance(name string, value interface{}) error {
-	if value == nil {
-		return errors.New("nil value")
+func (m *mockContainer) Instance(abstract reflect.Type, concrete interface{}) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.instances[abstract]; exists {
+		return app.ErrDuplicateInstance.WithDetail("type", abstract.String())
 	}
-	m.instances[name] = value
+	m.instances[abstract] = concrete
 	return nil
 }
 
-func (m *mockDIContainer) Factory(name string, factory func(contracts.DIContainer) (interface{}, error)) error {
-	if factory == nil {
-		return errors.New("nil factory")
+func (m *mockContainer) Factory(abstract reflect.Type, factory func(contracts.DIContainer) (interface{}, error)) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.factories[abstract]; exists {
+		return app.ErrDuplicateFactory.WithDetail("type", abstract.String())
 	}
-	m.factories[name] = factory
+	m.factories[abstract] = factory
 	return nil
 }
 
-func (m *mockDIContainer) Resolve(name string) (interface{}, error) {
-	if instance, exists := m.instances[name]; exists {
+func (m *mockContainer) Resolve(abstract reflect.Type) (interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if instance, exists := m.instances[abstract]; exists {
 		return instance, nil
 	}
-	if factory, exists := m.factories[name]; exists {
+
+	if factory, exists := m.factories[abstract]; exists {
 		return factory(m)
 	}
-	return nil, errors.New("not found")
+
+	return nil, app.ErrValueNotFound.WithDetail("type", abstract.String())
 }
 
 type mockAppContextWithCancel struct {
@@ -422,7 +436,7 @@ func TestCli_RunWithOSArgs(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(
@@ -464,7 +478,7 @@ func TestCli_RunWithCancelledContext(t *testing.T) {
 
 	appCtx := &mockAppContextWithCancel{
 		ctx:       ctx,
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(NewContext(appCtx, nil, nil, args[1:]))
@@ -504,7 +518,7 @@ func TestCli_RunWithTimeout(t *testing.T) {
 
 	appCtx := &mockAppContextWithCancel{
 		ctx:       ctx,
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -531,7 +545,7 @@ func TestCli_RunWithEmptyArgs(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(NewContext(appCtx, nil, nil, args[1:]))
@@ -565,7 +579,7 @@ func TestCli_RunPreservesStdio(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	originalStdin := os.Stdin
@@ -613,7 +627,7 @@ func TestCli_RunWithValidationError(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(NewContext(appCtx, nil, nil, args[1:]))
@@ -650,7 +664,7 @@ func TestCli_RunWithExecutionError(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(NewContext(appCtx, nil, nil, args[1:]))
@@ -714,7 +728,7 @@ func TestCli_RunHandlesPanic(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	defer func() {
@@ -767,7 +781,7 @@ func TestCli_RunWithOutput(t *testing.T) {
 	defer func() { os.Stdout = originalStdout }()
 
 	c, cmd := setupTestCLI(t, "test")
-	appCtx := &mockAppContextWithCancel{container: newMockDIContainer()}
+	appCtx := &mockAppContextWithCancel{container: newMockContainer()}
 
 	done := make(chan error, 1)
 	go func() {
@@ -866,7 +880,7 @@ func TestCli_RunWithComplexArgs(t *testing.T) {
 	}
 
 	appCtx := &mockAppContextWithCancel{
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	err = c.Run(NewContext(appCtx, nil, nil, args[1:]))
@@ -1039,7 +1053,7 @@ func setupTestContext(_ *testing.T, cancelAfter time.Duration) (*mockAppContextW
 
 	appCtx := &mockAppContextWithCancel{
 		ctx:       ctx,
-		container: newMockDIContainer(),
+		container: newMockContainer(),
 	}
 
 	return appCtx, cancel

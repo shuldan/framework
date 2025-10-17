@@ -1,8 +1,12 @@
 package events
 
 import (
+	"reflect"
+
 	"github.com/shuldan/framework/pkg/contracts"
 )
+
+const ModuleName = "events"
 
 type module struct{}
 
@@ -11,14 +15,14 @@ func NewModule() contracts.AppModule {
 }
 
 func (m *module) Name() string {
-	return contracts.EventBusModuleName
+	return ModuleName
 }
 
 func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
-		contracts.EventBusModuleName,
+		reflect.TypeOf((*contracts.EventBus)(nil)).Elem(),
 		func(c contracts.DIContainer) (interface{}, error) {
-			logger, err := c.Resolve(contracts.LoggerModuleName)
+			logger, err := c.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 			if err != nil {
 				return nil, ErrLoggerNotFound.WithCause(err)
 			}
@@ -38,12 +42,12 @@ func (m *module) Register(container contracts.DIContainer) error {
 	)
 }
 
-func (m *module) Start(ctx contracts.AppContext) error {
+func (m *module) Start(_ contracts.AppContext) error {
 	return nil
 }
 
 func (m *module) Stop(ctx contracts.AppContext) error {
-	b, err := ctx.Container().Resolve(contracts.EventBusModuleName)
+	b, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.EventBus)(nil)).Elem())
 	if err != nil {
 		return ErrBusNotFound.WithCause(err)
 	}
@@ -71,7 +75,7 @@ func (m *module) getEventBusOptions(c contracts.DIContainer, logger contracts.Lo
 		)
 	}
 
-	if configInst, err := c.Resolve(contracts.ConfigModuleName); err == nil {
+	if configInst, err := c.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem()); err == nil {
 		if cfg, ok := configInst.(contracts.Config); ok {
 			if eventsCfg, ok := cfg.GetSub("events"); ok {
 				asyncMode := eventsCfg.GetBool("async_mode", false)

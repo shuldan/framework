@@ -1,9 +1,11 @@
 package queue
 
+import "github.com/shuldan/framework/pkg/contracts"
+
 type Option func(*queueConfig)
 
 type queueConfig struct {
-	broker       Broker
+	broker       contracts.Broker
 	errorHandler ErrorHandler
 	panicHandler PanicHandler
 	concurrency  int

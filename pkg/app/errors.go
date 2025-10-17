@@ -14,8 +14,8 @@ var (
 
 	ErrModuleStop = newRegistryCode().New("failed to stop module {{.module}}")
 
-	ErrCircularDep       = newContainerCode().New("circular dependency detected for key {{.name}}")
-	ErrValueNotFound     = newContainerCode().New("value not found for key {{.name}}")
-	ErrDuplicateInstance = newContainerCode().New("instance already exists for key {{.name}}")
-	ErrDuplicateFactory  = newContainerCode().New("factory already registered for key {{.name}}")
+	ErrCircularDep       = newContainerCode().New("circular dependency detected for type {{.type}}")
+	ErrValueNotFound     = newContainerCode().New("value not found for type {{.type}}")
+	ErrDuplicateInstance = newContainerCode().New("instance already exists for type {{.type}}")
+	ErrDuplicateFactory  = newContainerCode().New("factory already registered for type {{.type}}")
 )

@@ -1,56 +1,67 @@
 package broker
 
 import (
+	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/shuldan/framework/pkg/app"
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type mockContainer struct {
-	instances map[string]interface{}
-	factories map[string]func(contracts.DIContainer) (interface{}, error)
+	mu        sync.RWMutex
+	instances map[reflect.Type]interface{}
+	factories map[reflect.Type]func(contracts.DIContainer) (interface{}, error)
 }
 
 func newMockContainer() *mockContainer {
 	return &mockContainer{
-		instances: make(map[string]interface{}),
-		factories: make(map[string]func(contracts.DIContainer) (interface{}, error)),
+		instances: make(map[reflect.Type]interface{}),
+		factories: make(map[reflect.Type]func(contracts.DIContainer) (interface{}, error)),
 	}
 }
 
-func (m *mockContainer) Has(name string) bool {
-	_, hasInstance := m.instances[name]
-	_, hasFactory := m.factories[name]
+func (m *mockContainer) Has(abstract reflect.Type) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, hasInstance := m.instances[abstract]
+	_, hasFactory := m.factories[abstract]
 	return hasInstance || hasFactory
 }
 
-func (m *mockContainer) Instance(name string, value interface{}) error {
-	if _, exists := m.instances[name]; exists {
-		return app.ErrDuplicateInstance
+func (m *mockContainer) Instance(abstract reflect.Type, concrete interface{}) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.instances[abstract]; exists {
+		return app.ErrDuplicateInstance.WithDetail("type", abstract.String())
 	}
-	m.instances[name] = value
+	m.instances[abstract] = concrete
 	return nil
 }
 
-func (m *mockContainer) Factory(name string, factory func(contracts.DIContainer) (interface{}, error)) error {
-	if _, exists := m.factories[name]; exists {
-		return app.ErrDuplicateFactory
+func (m *mockContainer) Factory(abstract reflect.Type, factory func(contracts.DIContainer) (interface{}, error)) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.factories[abstract]; exists {
+		return app.ErrDuplicateFactory.WithDetail("type", abstract.String())
 	}
-	m.factories[name] = factory
+	m.factories[abstract] = factory
 	return nil
 }
 
-func (m *mockContainer) Resolve(name string) (interface{}, error) {
-	if instance, exists := m.instances[name]; exists {
+func (m *mockContainer) Resolve(abstract reflect.Type) (interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if instance, exists := m.instances[abstract]; exists {
 		return instance, nil
 	}
 
-	if factory, exists := m.factories[name]; exists {
+	if factory, exists := m.factories[abstract]; exists {
 		return factory(m)
 	}
 
-	return nil, app.ErrValueNotFound.WithDetail("name", name)
+	return nil, app.ErrValueNotFound.WithDetail("type", abstract.String())
 }
 
 type mockConfig struct {

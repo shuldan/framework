@@ -19,7 +19,7 @@ type broker struct {
 	logger   contracts.Logger
 }
 
-func New(logger contracts.Logger) queue.Broker {
+func New(logger contracts.Logger) contracts.Broker {
 	return &broker{
 		channels: make(map[string]chan []byte),
 		runners:  make(map[string][]context.CancelFunc),

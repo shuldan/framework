@@ -8,61 +8,69 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/shuldan/framework/pkg/app"
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type mockContainer struct {
-	items     map[string]interface{}
-	factories map[string]func(container contracts.DIContainer) (interface{}, error)
+	mu        sync.RWMutex
+	instances map[reflect.Type]interface{}
+	factories map[reflect.Type]func(contracts.DIContainer) (interface{}, error)
 }
 
-func (m *mockContainer) Has(name string) bool {
-	if _, ok := m.items[name]; ok {
-		return true
+func newMockContainer() *mockContainer {
+	return &mockContainer{
+		instances: make(map[reflect.Type]interface{}),
+		factories: make(map[reflect.Type]func(contracts.DIContainer) (interface{}, error)),
 	}
-	_, ok := m.factories[name]
-	return ok
 }
 
-func (m *mockContainer) Instance(name string, value interface{}) error {
-	if name == "" {
-		return io.EOF
+func (m *mockContainer) Has(abstract reflect.Type) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, hasInstance := m.instances[abstract]
+	_, hasFactory := m.factories[abstract]
+	return hasInstance || hasFactory
+}
+
+func (m *mockContainer) Instance(abstract reflect.Type, concrete interface{}) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.instances[abstract]; exists {
+		return app.ErrDuplicateInstance.WithDetail("type", abstract.String())
 	}
-	m.items[name] = value
+	m.instances[abstract] = concrete
 	return nil
 }
 
-func (m *mockContainer) Factory(name string, factory func(container contracts.DIContainer) (interface{}, error)) error {
-	if name == "" {
-		return io.EOF
+func (m *mockContainer) Factory(abstract reflect.Type, factory func(contracts.DIContainer) (interface{}, error)) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.factories[abstract]; exists {
+		return app.ErrDuplicateFactory.WithDetail("type", abstract.String())
 	}
-	m.factories[name] = factory
-
-	if result, err := factory(m); err == nil {
-		m.items[name] = result
-	}
+	m.factories[abstract] = factory
 	return nil
 }
 
-func (m *mockContainer) Resolve(name string) (interface{}, error) {
-	if val, ok := m.items[name]; ok {
-		return val, nil
+func (m *mockContainer) Resolve(abstract reflect.Type) (interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if instance, exists := m.instances[abstract]; exists {
+		return instance, nil
 	}
 
-	if factory, ok := m.factories[name]; ok {
-		result, err := factory(m)
-		if err != nil {
-			return nil, err
-		}
-		m.items[name] = result
-		return result, nil
+	if factory, exists := m.factories[abstract]; exists {
+		return factory(m)
 	}
 
-	return nil, io.EOF
+	return nil, app.ErrValueNotFound.WithDetail("type", abstract.String())
 }
 
 type mockConfig struct {
@@ -198,17 +206,14 @@ func TestModule_Name(t *testing.T) {
 func TestModule_Register(t *testing.T) {
 	t.Parallel()
 	m := NewModule()
-	container := &mockContainer{
-		items:     make(map[string]interface{}),
-		factories: make(map[string]func(container contracts.DIContainer) (interface{}, error)),
-	}
+	container := newMockContainer()
 
 	err := m.Register(container)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
 
-	if _, ok := container.items["logger"]; !ok {
+	if _, ok := container.factories[reflect.TypeOf((*contracts.Logger)(nil)).Elem()]; !ok {
 		t.Error("Logger not registered in container")
 	}
 }
@@ -218,10 +223,9 @@ func TestModule_Start(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger, _ := NewLogger(WithWriter(buf))
 
-	container := &mockContainer{
-		items:     map[string]interface{}{"logger": logger},
-		factories: make(map[string]func(container contracts.DIContainer) (interface{}, error)),
-	}
+	container := newMockContainer()
+	container.instances[reflect.TypeOf((*contracts.Logger)(nil)).Elem()] = logger
+
 	ctx := &mockAppContext{
 		container: container,
 		startTime: time.Now(),
@@ -247,10 +251,9 @@ func TestModule_Stop(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger, _ := NewLogger(WithWriter(buf))
 
-	container := &mockContainer{
-		items:     map[string]interface{}{"logger": logger},
-		factories: make(map[string]func(container contracts.DIContainer) (interface{}, error)),
-	}
+	container := newMockContainer()
+	container.instances[reflect.TypeOf((*contracts.Logger)(nil)).Elem()] = logger
+
 	ctx := &mockAppContext{
 		container: container,
 		startTime: time.Now().Add(-time.Hour),
@@ -334,10 +337,7 @@ func TestModule_OptionsFromFileConfig(t *testing.T) {
 func TestModule_GetLoggerOptions_NoConfig(t *testing.T) {
 	t.Parallel()
 	m := &module{}
-	container := &mockContainer{
-		items:     make(map[string]interface{}),
-		factories: make(map[string]func(container contracts.DIContainer) (interface{}, error)),
-	}
+	container := newMockContainer()
 
 	options, _ := m.getLoggerOptions(container)
 

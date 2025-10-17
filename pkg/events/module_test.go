@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -12,13 +13,6 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 	"github.com/shuldan/framework/pkg/errors"
 )
-
-func TestModule_Name(t *testing.T) {
-	m := NewModule()
-	if m.Name() != contracts.EventBusModuleName {
-		t.Errorf("expected module name %s, got %s", contracts.EventBusModuleName, m.Name())
-	}
-}
 
 func TestModule_Register(t *testing.T) {
 	tests := []struct {
@@ -37,14 +31,14 @@ func TestModule_Register(t *testing.T) {
 			name: "register with logger",
 			setupFunc: func(c contracts.DIContainer) {
 				logger := &mockLogger{}
-				_ = c.Instance(contracts.LoggerModuleName, logger)
+				_ = c.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 			},
 			expectError: false,
 		},
 		{
 			name: "register with invalid logger",
 			setupFunc: func(c contracts.DIContainer) {
-				_ = c.Instance(contracts.LoggerModuleName, "not a logger")
+				_ = c.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), "not a logger")
 			},
 			expectError: false,
 		},
@@ -57,7 +51,7 @@ func TestModule_Register(t *testing.T) {
 						"worker_count": 5,
 					},
 				})
-				_ = c.Instance(contracts.ConfigModuleName, cfg)
+				_ = c.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), cfg)
 			},
 			expectError: false,
 		},
@@ -75,7 +69,7 @@ func TestModule_Register(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			if !tt.expectError {
-				if !container.Has(contracts.EventBusModuleName) {
+				if !container.Has(reflect.TypeOf((*contracts.EventBus)(nil)).Elem()) {
 					t.Error("event bus should be registered")
 				}
 			}
@@ -99,7 +93,7 @@ func TestModule_GetEventBusOptions(t *testing.T) {
 						"worker_count": 10,
 					},
 				})
-				_ = c.Instance(contracts.ConfigModuleName, cfg)
+				_ = c.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), cfg)
 			},
 			expectedAsync:  true,
 			expectedWorker: 10,
@@ -170,7 +164,7 @@ func TestModule_Stop(t *testing.T) {
 			name: "stop with valid bus",
 			setupFunc: func(c contracts.DIContainer) {
 				bus := New()
-				_ = c.Instance(contracts.EventBusModuleName, bus)
+				_ = c.Instance(reflect.TypeOf((*contracts.EventBus)(nil)).Elem(), bus)
 			},
 			expectError: false,
 		},
@@ -185,7 +179,7 @@ func TestModule_Stop(t *testing.T) {
 		{
 			name: "stop with invalid bus type",
 			setupFunc: func(c contracts.DIContainer) {
-				_ = c.Instance(contracts.EventBusModuleName, "not a bus")
+				_ = c.Instance(reflect.TypeOf((*contracts.EventBus)(nil)).Elem(), "not a bus")
 			},
 			expectError: true,
 			errorType:   ErrInvalidBusInstance,
@@ -220,7 +214,7 @@ func TestModule_FullLifecycle(t *testing.T) {
 	container := app.NewContainer()
 
 	logger := &mockLogger{}
-	_ = container.Instance(contracts.LoggerModuleName, logger)
+	_ = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 
 	cfg := config.NewMapConfig(map[string]interface{}{
 		"events": map[string]interface{}{
@@ -228,7 +222,7 @@ func TestModule_FullLifecycle(t *testing.T) {
 			"worker_count": 2,
 		},
 	})
-	_ = container.Instance(contracts.ConfigModuleName, cfg)
+	_ = container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), cfg)
 
 	m := NewModule()
 	err := m.Register(container)
@@ -243,7 +237,7 @@ func TestModule_FullLifecycle(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	bus, err := container.Resolve(contracts.EventBusModuleName)
+	bus, err := container.Resolve(reflect.TypeOf((*contracts.EventBus)(nil)).Elem())
 	if err != nil {
 		t.Fatalf("failed to resolve event bus: %v", err)
 	}
@@ -374,7 +368,7 @@ func TestModule_ErrorScenarios(t *testing.T) {
 	t.Run("stop with closed bus", func(t *testing.T) {
 		container := app.NewContainer()
 		bus := New()
-		_ = container.Instance(contracts.EventBusModuleName, bus)
+		_ = container.Instance(reflect.TypeOf((*contracts.EventBus)(nil)).Elem(), bus)
 
 		_ = bus.Close()
 
@@ -390,7 +384,7 @@ func TestModule_ErrorScenarios(t *testing.T) {
 	t.Run("register with factory error", func(t *testing.T) {
 		container := app.NewContainer()
 
-		_ = container.Factory(contracts.LoggerModuleName, func(c contracts.DIContainer) (interface{}, error) {
+		_ = container.Factory(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), func(c contracts.DIContainer) (interface{}, error) {
 			return nil, fmt.Errorf("factory error")
 		})
 
@@ -450,7 +444,7 @@ func setupEventBus(t *testing.T) (contracts.EventBus, contracts.AppModule, *mock
 	container := app.NewContainer()
 
 	logger := &mockLogger{}
-	_ = container.Instance(contracts.LoggerModuleName, logger)
+	_ = container.Instance(reflect.TypeOf((*contracts.Logger)(nil)).Elem(), logger)
 
 	cfg := config.NewMapConfig(map[string]interface{}{
 		"events": map[string]interface{}{
@@ -458,7 +452,7 @@ func setupEventBus(t *testing.T) (contracts.EventBus, contracts.AppModule, *mock
 			"worker_count": 5,
 		},
 	})
-	_ = container.Instance(contracts.ConfigModuleName, cfg)
+	_ = container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), cfg)
 
 	m := NewModule()
 	err := m.Register(container)
@@ -472,7 +466,7 @@ func setupEventBus(t *testing.T) (contracts.EventBus, contracts.AppModule, *mock
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	bus, err := container.Resolve(contracts.EventBusModuleName)
+	bus, err := container.Resolve(reflect.TypeOf((*contracts.EventBus)(nil)).Elem())
 	if err != nil {
 		t.Fatalf("failed to resolve event bus: %v", err)
 	}

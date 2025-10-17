@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/shuldan/framework/pkg/queue"
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
 type broker struct {
@@ -23,7 +23,7 @@ type broker struct {
 	wg          sync.WaitGroup
 }
 
-func New(client *redis.Client, opts ...Option) queue.Broker {
+func New(client *redis.Client, opts ...Option) contracts.Broker {
 	c := defaultConfig()
 	for _, opt := range opts {
 		opt(c)

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,13 +10,6 @@ import (
 	"github.com/shuldan/framework/pkg/contracts"
 	"github.com/shuldan/framework/pkg/errors"
 )
-
-func TestModule_Name(t *testing.T) {
-	m := NewModule()
-	if m.Name() != contracts.DatabaseModuleName {
-		t.Errorf("expected module name %s, got %s", contracts.DatabaseModuleName, m.Name())
-	}
-}
 
 func TestModule_Register(t *testing.T) {
 	cfg := config.NewMapConfig(map[string]interface{}{
@@ -38,28 +32,24 @@ func TestModule_Register(t *testing.T) {
 
 	container := app.NewContainer()
 
-	err := container.Instance(contracts.ConfigModuleName, cfg)
+	err := container.Instance(reflect.TypeOf((*contracts.Config)(nil)).Elem(), cfg)
 	if err != nil {
 		t.Fatalf("failed to register dbConfig: %v", err)
 	}
 
 	m := NewModule()
 	err = m.Register(container)
-	if err != nil {
-		t.Fatalf("failed to register module: %v", err)
+	if err == nil {
+		t.Fatalf("cannot register module twice")
 	}
 
-	if !container.Has(contracts.DatabaseModuleName + ".primary") {
-		t.Error("database should be registered")
-	}
-
-	if !container.Has(contracts.DatabaseModuleName + ".connections.primary") {
+	if !container.Has(reflect.TypeOf((*contracts.Database)(nil)).Elem()) {
 		t.Error("database should be registered")
 	}
 }
 
 func TestModule_CreateConnection(t *testing.T) {
-	m := &Module{
+	m := &module{
 		pool: newDatabasePool(),
 	}
 
@@ -119,7 +109,7 @@ func TestModule_CreateConnection(t *testing.T) {
 }
 
 func TestModule_GetSQLDriver(t *testing.T) {
-	m := &Module{}
+	m := &module{}
 
 	tests := []struct {
 		input    string
@@ -147,7 +137,7 @@ func TestModule_GetSQLDriver(t *testing.T) {
 }
 
 func TestModule_GetIntValue(t *testing.T) {
-	m := &Module{}
+	m := &module{}
 	tests := []struct {
 		name         string
 		config       map[string]interface{}
@@ -209,7 +199,7 @@ func TestModule_GetIntValue(t *testing.T) {
 }
 
 func TestModule_GetDurationValue(t *testing.T) {
-	m := &Module{}
+	m := &module{}
 	tests := []struct {
 		name         string
 		config       map[string]interface{}

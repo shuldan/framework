@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
+
+const ModuleName = "logger"
 
 type module struct{}
 
@@ -19,12 +22,12 @@ func NewModule() contracts.AppModule {
 }
 
 func (m *module) Name() string {
-	return contracts.LoggerModuleName
+	return ModuleName
 }
 
 func (m *module) Register(container contracts.DIContainer) error {
 	return container.Factory(
-		contracts.LoggerModuleName,
+		reflect.TypeOf((*contracts.Logger)(nil)).Elem(),
 		func(c contracts.DIContainer) (interface{}, error) {
 			options, err := m.getLoggerOptions(c)
 			if err != nil {
@@ -36,7 +39,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 }
 
 func (m *module) Start(ctx contracts.AppContext) error {
-	if log, err := ctx.Container().Resolve(contracts.LoggerModuleName); err == nil {
+	if log, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem()); err == nil {
 		if logger, ok := log.(contracts.Logger); ok {
 			logger.Info("Logging started",
 				"app", ctx.AppName(),
@@ -49,7 +52,7 @@ func (m *module) Start(ctx contracts.AppContext) error {
 }
 
 func (m *module) Stop(ctx contracts.AppContext) error {
-	if log, err := ctx.Container().Resolve(contracts.LoggerModuleName); err == nil {
+	if log, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem()); err == nil {
 		if logger, ok := log.(contracts.Logger); ok {
 			logger.Info("Logging stopped",
 				"app", ctx.AppName(),
@@ -63,7 +66,7 @@ func (m *module) Stop(ctx contracts.AppContext) error {
 func (m *module) getLoggerOptions(c contracts.DIContainer) ([]Option, error) {
 	var options []Option
 
-	if configInst, err := c.Resolve(contracts.ConfigModuleName); err == nil {
+	if configInst, err := c.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem()); err == nil {
 		if cfg, ok := configInst.(contracts.Config); ok {
 			if loggerCfg, ok := cfg.GetSub("logger"); ok {
 				opts, err := m.optionsFromFileConfig(loggerCfg)

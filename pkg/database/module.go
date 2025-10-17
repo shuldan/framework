@@ -2,28 +2,31 @@ package database
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type Module struct {
+const ModuleName = "database"
+
+type module struct {
 	pool *databasePool
 }
 
 func NewModule() contracts.AppModule {
-	return &Module{
+	return &module{
 		pool: newDatabasePool(),
 	}
 }
 
-func (m *Module) Name() string {
-	return contracts.DatabaseModuleName
+func (m *module) Name() string {
+	return ModuleName
 }
 
-func (m *Module) Register(container contracts.DIContainer) error {
-	cfg, err := container.Resolve(contracts.ConfigModuleName)
+func (m *module) Register(container contracts.DIContainer) error {
+	cfg, err := container.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem())
 	if err != nil {
 		return ErrResolveConfig.
 			WithDetail("reason", err.Error()).
@@ -31,40 +34,33 @@ func (m *Module) Register(container contracts.DIContainer) error {
 	}
 
 	config := cfg.(contracts.Config)
-	dbConfig, ok := config.GetSub("database")
+	dbCfg, ok := config.GetSub("database")
 	if !ok {
 		return ErrConfigNotFound.WithDetail("reason", "database config not found")
 	}
 
-	defaultConnectionName := dbConfig.GetString("default", "primary")
-	connectionsConfig, ok := dbConfig.GetSub("connections")
+	defaultName := dbCfg.GetString("default", "primary")
+	defaultConfig, ok := dbCfg.GetSub("connections." + defaultName)
 	if !ok {
 		return ErrConnectionsNotFound
 	}
-	allConnections := connectionsConfig.All()
-	for name, connData := range allConnections {
-		connMap, ok := connData.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		db, err := m.createConnection(name, connMap)
-		if err != nil {
-			return ErrCreateConnection.
-				WithDetail("name", name).
-				WithDetail("reason", err.Error()).
-				WithCause(err)
-		}
-		if err := m.pool.registerDatabase(name, db); err != nil {
-			return err
-		}
-		if err := container.Instance(contracts.DatabaseModuleName+".connections."+name, db); err != nil {
-			return err
-		}
-		if name == defaultConnectionName {
-			if err := container.Instance(contracts.DatabaseModuleName+"."+name, db); err != nil {
-				return err
-			}
-		}
+	connMap := defaultConfig.All()
+
+	db, err := m.createConnection(defaultName, connMap)
+	if err != nil {
+		return ErrCreateConnection.
+			WithDetail("name", defaultName).
+			WithDetail("reason", err.Error()).
+			WithCause(err)
+	}
+	if err := m.pool.registerDatabase(defaultName, db); err != nil {
+		return err
+	}
+	if err := container.Instance(reflect.TypeOf((*contracts.Database)(nil)).Elem(), db); err != nil {
+		return err
+	}
+	if err := container.Instance(reflect.TypeOf((*contracts.Database)(nil)).Elem(), db); err != nil {
+		return err
 	}
 
 	if err := m.pool.connectAll(); err != nil {
@@ -74,15 +70,15 @@ func (m *Module) Register(container contracts.DIContainer) error {
 	return nil
 }
 
-func (m *Module) Start(ctx contracts.AppContext) error {
+func (m *module) Start(ctx contracts.AppContext) error {
 	return nil
 }
 
-func (m *Module) Stop(_ contracts.AppContext) error {
+func (m *module) Stop(_ contracts.AppContext) error {
 	return m.pool.closeAll()
 }
 
-func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, error) {
+func (m *module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, error) {
 	registry := ctx.AppRegistry()
 	for _, module := range registry.All() {
 		if provider, ok := module.(contracts.MigrationsProvider); ok {
@@ -94,7 +90,7 @@ func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, 
 	}
 
 	container := ctx.Container()
-	configRaw, err := container.Resolve(contracts.ConfigModuleName)
+	configRaw, err := container.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem())
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +99,7 @@ func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, 
 		return nil, fmt.Errorf("invalid config instance")
 	}
 
-	loggerRaw, err := container.Resolve(contracts.LoggerModuleName)
+	loggerRaw, err := container.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +116,7 @@ func (m *Module) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, 
 	}, nil
 }
 
-func (m *Module) createConnection(name string, config map[string]interface{}) (contracts.Database, error) {
+func (m *module) createConnection(name string, config map[string]interface{}) (contracts.Database, error) {
 	driver, ok := config["driver"].(string)
 	if !ok {
 		return nil, ErrDriverNotSpecified.WithDetail("name", name)
@@ -140,7 +136,7 @@ func (m *Module) createConnection(name string, config map[string]interface{}) (c
 	return db, nil
 }
 
-func (m *Module) getSQLDriver(driver string) string {
+func (m *module) getSQLDriver(driver string) string {
 	switch strings.ToLower(driver) {
 	case "mysql":
 		return "mysql"
@@ -153,7 +149,7 @@ func (m *Module) getSQLDriver(driver string) string {
 	}
 }
 
-func (m *Module) getConnectionOptions(config map[string]interface{}) []Option {
+func (m *module) getConnectionOptions(config map[string]interface{}) []Option {
 	var options []Option
 
 	if poolConfig, ok := config["pool"].(map[string]interface{}); ok {
@@ -175,7 +171,7 @@ func (m *Module) getConnectionOptions(config map[string]interface{}) []Option {
 	return options
 }
 
-func (m *Module) getIntValue(config map[string]interface{}, key string, defaultValue int) int {
+func (m *module) getIntValue(config map[string]interface{}, key string, defaultValue int) int {
 	if val, ok := config[key]; ok {
 		switch v := val.(type) {
 		case int:
@@ -195,7 +191,7 @@ func (m *Module) getIntValue(config map[string]interface{}, key string, defaultV
 	return defaultValue
 }
 
-func (m *Module) getDurationValue(config map[string]interface{}, key string, defaultValue time.Duration) time.Duration {
+func (m *module) getDurationValue(config map[string]interface{}, key string, defaultValue time.Duration) time.Duration {
 	if val, ok := config[key]; ok {
 		switch v := val.(type) {
 		case string:

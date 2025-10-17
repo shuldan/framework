@@ -8,23 +8,45 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/shuldan/framework/pkg/contracts"
 )
 
-type Broker interface {
-	Produce(ctx context.Context, topic string, data []byte) error
-	Consume(ctx context.Context, topic string, handler func([]byte) error) error
-	Close() error
+type Message interface {
+	ID() string
+	Body() []byte
+	Headers() map[string]interface{}
+	Ack() error
+	Nack(requeue bool) error
 }
 
-type Queue[T any] interface {
-	Produce(ctx context.Context, job T) error
-	Consume(ctx context.Context, handler func(context.Context, T) error) error
+type Producer interface {
+	Publish(ctx context.Context, message []byte, headers map[string]interface{}) error
+}
+
+type Processor interface {
+	Process(ctx context.Context, msg Message) error
+}
+
+type Consumer interface {
+	Consume(ctx context.Context, processor Processor) error
+}
+
+type Manager interface {
+	DeclareQueue(name string) error
+	DeleteQueue(name string) error
+}
+
+type Queue interface {
+	Producer
+	Consumer
+	Manager
 	Close() error
 }
 
 type typedQueue[T any] struct {
 	topic        string
-	broker       Broker
+	broker       contracts.Broker
 	concurrency  int
 	maxRetries   int
 	backoff      BackoffStrategy
@@ -37,7 +59,7 @@ type typedQueue[T any] struct {
 	counter      Counter
 }
 
-func New[T any](broker Broker, opts ...Option) (Queue[T], error) {
+func New[T any](broker contracts.Broker, opts ...Option) (contracts.Queue[T], error) {
 	var t T
 	typ := reflect.TypeOf(t)
 

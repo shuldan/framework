@@ -1,12 +1,12 @@
 package broker
 
 import (
+	"reflect"
 	"time"
 
 	rdClient "github.com/redis/go-redis/v9"
 
 	"github.com/shuldan/framework/pkg/contracts"
-	"github.com/shuldan/framework/pkg/queue"
 	"github.com/shuldan/framework/pkg/queue/broker/memory"
 	"github.com/shuldan/framework/pkg/queue/broker/redis"
 )
@@ -18,11 +18,11 @@ func NewModule() contracts.AppModule {
 }
 
 func (m *module) Name() string {
-	return contracts.QueueBrokerModuleName
+	return "queue.broker"
 }
 
 func (m *module) Register(container contracts.DIContainer) error {
-	config, err := container.Resolve(contracts.ConfigModuleName)
+	config, err := container.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem())
 	if err != nil {
 		return err
 	}
@@ -31,7 +31,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 		return ErrInvalidConfigInstance
 	}
 
-	logger, err := container.Resolve(contracts.LoggerModuleName)
+	logger, err := container.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 	driver := queueCfg.GetString("driver", "memory")
 	switch driver {
 	case "memory":
-		return container.Instance(contracts.QueueBrokerModuleName, memory.New(loggerInst))
+		return container.Instance(reflect.TypeOf((*contracts.Broker)(nil)).Elem(), memory.New(loggerInst))
 	case "redis":
 		redisCfg, exists := queueCfg.GetSub("drivers.redis")
 		if !exists {
@@ -66,7 +66,7 @@ func (m *module) Register(container contracts.DIContainer) error {
 			Password: clientCfg.GetString("password", ""),
 		})
 
-		return container.Instance(contracts.QueueBrokerModuleName, m.createRedisBroker(redisCfg, client))
+		return container.Instance(reflect.TypeOf((*contracts.Broker)(nil)).Elem(), m.createRedisBroker(redisCfg, client))
 	default:
 		return ErrUnsupportedQueueDriver
 	}
@@ -77,13 +77,13 @@ func (m *module) Start(_ contracts.AppContext) error {
 }
 
 func (m *module) Stop(ctx contracts.AppContext) error {
-	broker, err := ctx.Container().Resolve(contracts.QueueBrokerModuleName)
+	broker, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Broker)(nil)).Elem())
 	if err != nil {
 		// Если брокер не зарегистрирован, это не ошибка
 		return nil
 	}
 
-	brokerInst, ok := broker.(queue.Broker)
+	brokerInst, ok := broker.(contracts.Broker)
 	if !ok {
 		return nil
 	}
@@ -91,7 +91,7 @@ func (m *module) Stop(ctx contracts.AppContext) error {
 	return brokerInst.Close()
 }
 
-func (m *module) createRedisBroker(cfg contracts.Config, client *rdClient.Client) queue.Broker {
+func (m *module) createRedisBroker(cfg contracts.Config, client *rdClient.Client) contracts.Broker {
 	var opts []redis.Option
 
 	if prefix := cfg.GetString("prefix", ""); prefix != "" {

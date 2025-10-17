@@ -2,9 +2,15 @@ package http
 
 import (
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/shuldan/framework/pkg/contracts"
+)
+
+const (
+	ModuleClientName = "http.client"
+	ModuleServerName = "http.server"
 )
 
 type clientModule struct{}
@@ -14,11 +20,11 @@ func NewClientModule() contracts.AppModule {
 }
 
 func (m *clientModule) Name() string {
-	return contracts.HTTPClientModuleName
+	return ModuleClientName
 }
 
 func (m *clientModule) Register(container contracts.DIContainer) error {
-	logger, err := container.Resolve(contracts.LoggerModuleName)
+	logger, err := container.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return ErrLoggerNotFound.WithCause(err)
 	}
@@ -27,7 +33,7 @@ func (m *clientModule) Register(container contracts.DIContainer) error {
 		return ErrInvalidLoggerInstance
 	}
 
-	return container.Factory(contracts.HTTPClientModuleName, func(c contracts.DIContainer) (interface{}, error) {
+	return container.Factory(reflect.TypeOf((*contracts.HTTPClient)(nil)).Elem(), func(c contracts.DIContainer) (interface{}, error) {
 		return NewClient(loggerInst), nil
 	})
 }
@@ -47,7 +53,7 @@ func NewServerModule() contracts.AppModule {
 }
 
 func (m *serverModule) Name() string {
-	return contracts.HTTPServerModuleName
+	return ModuleServerName
 }
 
 func (m *serverModule) Register(container contracts.DIContainer) error {
@@ -63,7 +69,7 @@ func (m *serverModule) Register(container contracts.DIContainer) error {
 }
 
 func (m *serverModule) Start(ctx contracts.AppContext) error {
-	routerRaw, err := ctx.Container().Resolve(contracts.HTTPRouterModuleName)
+	routerRaw, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.HTTPRouter)(nil)).Elem())
 	if err != nil {
 		return ErrHTTPRouterNotFound.WithCause(err)
 	}
@@ -110,7 +116,7 @@ func (m *serverModule) Stop(ctx contracts.AppContext) error {
 }
 
 func (m *serverModule) CliCommands(ctx contracts.AppContext) ([]contracts.CliCommand, error) {
-	logger, err := ctx.Container().Resolve(contracts.LoggerModuleName)
+	logger, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return nil, ErrLoggerNotFound.WithCause(err)
 	}
@@ -119,7 +125,7 @@ func (m *serverModule) CliCommands(ctx contracts.AppContext) ([]contracts.CliCom
 		return nil, ErrInvalidLoggerInstance
 	}
 
-	router, err := ctx.Container().Resolve(contracts.HTTPRouterModuleName)
+	router, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.HTTPRouter)(nil)).Elem())
 	if err != nil {
 		return nil, ErrHTTPRouterNotFound.WithCause(err)
 	}
@@ -128,7 +134,7 @@ func (m *serverModule) CliCommands(ctx contracts.AppContext) ([]contracts.CliCom
 		return nil, ErrInvalidHTTPRouterInstance
 	}
 
-	config, err := ctx.Container().Resolve(contracts.ConfigModuleName)
+	config, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem())
 	if err != nil {
 		return nil, ErrConfigNotFound.WithCause(err)
 	}
@@ -137,7 +143,7 @@ func (m *serverModule) CliCommands(ctx contracts.AppContext) ([]contracts.CliCom
 		return nil, ErrInvalidConfigInstance
 	}
 
-	server, err := ctx.Container().Resolve(contracts.HTTPServerModuleName)
+	server, err := ctx.Container().Resolve(reflect.TypeOf((*contracts.HTTPServer)(nil)).Elem())
 	if err != nil {
 		return nil, ErrHTTPServerNotFound.WithCause(err)
 	}
@@ -154,7 +160,7 @@ func (m *serverModule) CliCommands(ctx contracts.AppContext) ([]contracts.CliCom
 }
 
 func registerRouter(container contracts.DIContainer) error {
-	logger, err := container.Resolve(contracts.LoggerModuleName)
+	logger, err := container.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return ErrLoggerNotFound.WithCause(err)
 	}
@@ -163,7 +169,7 @@ func registerRouter(container contracts.DIContainer) error {
 		return ErrInvalidLoggerInstance
 	}
 
-	config, err := container.Resolve(contracts.ConfigModuleName)
+	config, err := container.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem())
 	if err != nil {
 		return ErrConfigNotFound.WithCause(err)
 	}
@@ -176,11 +182,11 @@ func registerRouter(container contracts.DIContainer) error {
 	middlewares := LoadMiddlewareFromConfig(configInst, loggerInst)
 	router.Use(middlewares...)
 
-	return container.Instance(contracts.HTTPRouterModuleName, router)
+	return container.Instance(reflect.TypeOf((*contracts.HTTPRouter)(nil)).Elem(), router)
 }
 
 func registerServer(container contracts.DIContainer) error {
-	logger, err := container.Resolve(contracts.LoggerModuleName)
+	logger, err := container.Resolve(reflect.TypeOf((*contracts.Logger)(nil)).Elem())
 	if err != nil {
 		return ErrLoggerNotFound.WithCause(err)
 	}
@@ -189,7 +195,7 @@ func registerServer(container contracts.DIContainer) error {
 		return ErrInvalidLoggerInstance
 	}
 
-	router, err := container.Resolve(contracts.HTTPRouterModuleName)
+	router, err := container.Resolve(reflect.TypeOf((*contracts.HTTPRouter)(nil)).Elem())
 	if err != nil {
 		return ErrHTTPRouterNotFound.WithCause(err)
 	}
@@ -200,7 +206,7 @@ func registerServer(container contracts.DIContainer) error {
 
 	var options []ServerOption
 
-	if config, err := container.Resolve(contracts.ConfigModuleName); err == nil {
+	if config, err := container.Resolve(reflect.TypeOf((*contracts.Config)(nil)).Elem()); err == nil {
 		if cfg, ok := config.(contracts.Config); ok {
 			if httpCfg, ok := cfg.GetSub("http.server"); ok {
 				options = append(options,
@@ -220,5 +226,5 @@ func registerServer(container contracts.DIContainer) error {
 		return err
 	}
 
-	return container.Instance(contracts.HTTPServerModuleName, server)
+	return container.Instance(reflect.TypeOf((*contracts.HTTPServer)(nil)).Elem(), server)
 }
