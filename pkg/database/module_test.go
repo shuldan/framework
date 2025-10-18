@@ -39,6 +39,10 @@ func TestModule_Register(t *testing.T) {
 
 	m := NewModule()
 	err = m.Register(container)
+	if err != nil {
+		t.Fatalf("failed to register module: %v", err)
+	}
+	err = m.Register(container)
 	if err == nil {
 		t.Fatalf("cannot register module twice")
 	}
