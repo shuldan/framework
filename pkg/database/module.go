@@ -59,9 +59,6 @@ func (m *module) Register(container contracts.DIContainer) error {
 	if err := container.Instance(reflect.TypeOf((*contracts.Database)(nil)).Elem(), db); err != nil {
 		return err
 	}
-	if err := container.Instance(reflect.TypeOf((*contracts.Database)(nil)).Elem(), db); err != nil {
-		return err
-	}
 
 	if err := m.pool.connectAll(); err != nil {
 		return err
