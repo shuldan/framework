@@ -409,3 +409,69 @@ func TestGetStack_Function(t *testing.T) {
 		t.Error("stack should contain current function name")
 	}
 }
+
+func TestWithPrefix_FixedSuffix(t *testing.T) {
+	gen := WithPrefix("API")
+
+	c1 := gen("FIXED")
+	c2 := gen("CUSTOM")
+
+	if c1 != "API_FIXED" {
+		t.Errorf("expected API_FIXED, got %s", c1)
+	}
+	if c2 != "API_CUSTOM" {
+		t.Errorf("expected API_CUSTOM, got %s", c2)
+	}
+}
+
+func TestWithPrefix_MixedUsage(t *testing.T) {
+	gen := WithPrefix("TEST")
+
+	auto1 := gen()        // TEST_0001
+	fixed := gen("FIXED") // TEST_FIXED
+	auto2 := gen()        // TEST_0002
+
+	if auto1 != "TEST_0001" {
+		t.Errorf("expected TEST_0001, got %s", auto1)
+	}
+	if fixed != "TEST_FIXED" {
+		t.Errorf("expected TEST_FIXED, got %s", fixed)
+	}
+	if auto2 != "TEST_0002" {
+		t.Errorf("expected TEST_0002, got %s", auto2)
+	}
+}
+
+func TestWithPrefix_EmptySuffix(t *testing.T) {
+	gen := WithPrefix("API")
+
+	c1 := gen("") // Должен сгенерировать API_0001
+	c2 := gen()   // Должен сгенерировать API_0002
+
+	if c1 != "API_0001" {
+		t.Errorf("expected API_0001 for empty suffix, got %s", c1)
+	}
+	if c2 != "API_0002" {
+		t.Errorf("expected API_0002, got %s", c2)
+	}
+}
+
+func TestWithPrefix_FixedCodesIndependentFromCounter(t *testing.T) {
+	gen := WithPrefix("TEST")
+
+	gen()              // TEST_0001
+	fixed1 := gen("A") // TEST_A
+	gen()              // TEST_0002
+	fixed2 := gen("B") // TEST_B
+	auto := gen()      // TEST_0003
+
+	if fixed1 != "TEST_A" {
+		t.Errorf("expected TEST_A, got %s", fixed1)
+	}
+	if fixed2 != "TEST_B" {
+		t.Errorf("expected TEST_B, got %s", fixed2)
+	}
+	if auto != "TEST_0003" {
+		t.Errorf("expected TEST_0003, got %s", auto)
+	}
+}

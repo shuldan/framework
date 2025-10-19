@@ -23,9 +23,12 @@ func (c Code) New(msg string) *Error {
 	}
 }
 
-func WithPrefix(prefix string) func() Code {
+func WithPrefix(prefix string) func(suffix ...string) Code {
 	counter := uint64(0)
-	return func() Code {
+	return func(suffix ...string) Code {
+		if len(suffix) > 0 && suffix[0] != "" {
+			return Code(fmt.Sprintf("%s_%s", prefix, suffix[0]))
+		}
 		next := atomic.AddUint64(&counter, 1)
 		return Code(fmt.Sprintf("%s_%04d", prefix, next))
 	}
