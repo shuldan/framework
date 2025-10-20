@@ -159,7 +159,7 @@ func testFreshCommandExecution(t *testing.T) {
 			}
 		}
 
-		if ctx.Ctx().IsRunning() {
+		if ctx.AppContext().IsRunning() {
 			t.Error("app context should be stopped after execution")
 		}
 	})

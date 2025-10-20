@@ -162,8 +162,8 @@ func TestServerAppliesShutdownTimeout(t *testing.T) {
 		select {
 		case <-time.After(500 * time.Millisecond):
 			return ctx.JSON(map[string]string{"status": "completed"})
-		case <-ctx.Context().Done():
-			return ctx.Context().Err()
+		case <-ctx.ParentContext().Done():
+			return ctx.ParentContext().Err()
 		}
 	})
 

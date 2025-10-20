@@ -66,6 +66,6 @@ func (c *migrationFreshCommand) Execute(ctx contracts.CliContext) error {
 	}
 
 	_, _ = fmt.Fprintln(ctx.Output(), "Fresh migration completed successfully")
-	ctx.Ctx().Stop()
+	ctx.AppContext().Stop()
 	return nil
 }

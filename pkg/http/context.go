@@ -47,11 +47,11 @@ func NewHTTPContext(w http.ResponseWriter, r *http.Request, logger contracts.Log
 	}
 }
 
-func (c *httpContext) Context() context.Context {
+func (c *httpContext) ParentContext() context.Context {
 	return c.req.Context()
 }
 
-func (c *httpContext) SetContext(ctx context.Context) {
+func (c *httpContext) WithParentContext(ctx context.Context) {
 	if oldReqID := c.req.Context().Value(RequestID); oldReqID != nil {
 		ctx = context.WithValue(ctx, RequestID, oldReqID)
 	}

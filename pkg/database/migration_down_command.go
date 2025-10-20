@@ -71,6 +71,6 @@ func (c *migrationDownCommand) Execute(ctx contracts.CliContext) error {
 	}
 
 	_, _ = fmt.Fprintln(ctx.Output(), "All migrations applied successfully")
-	ctx.Ctx().Stop()
+	ctx.AppContext().Stop()
 	return nil
 }

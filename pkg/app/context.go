@@ -41,7 +41,7 @@ func newAppContext(info Info, container contracts.DIContainer, appRegistry contr
 	}
 }
 
-func (c *appContext) Ctx() context.Context {
+func (c *appContext) ParentContext() context.Context {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.ctx

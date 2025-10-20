@@ -5,9 +5,9 @@ import "github.com/shuldan/framework/pkg/errors"
 var newEventCode = errors.WithPrefix("EVENTS")
 
 var (
-	ErrInvalidListener         = newEventCode().New("listener must be func(context.Context, T) error or have Handle(context.Context, T) error method")
-	ErrInvalidListenerFunction = newEventCode().New("listener function must have signature func(context.Context, T) error")
-	ErrInvalidListenerMethod   = newEventCode().New("Handle method must have signature Handle(context.Context, T) error")
+	ErrInvalidListener         = newEventCode().New("listener must be func(context.ParentContext, T) error or have Handle(context.ParentContext, T) error method")
+	ErrInvalidListenerFunction = newEventCode().New("listener function must have signature func(context.ParentContext, T) error")
+	ErrInvalidListenerMethod   = newEventCode().New("Handle method must have signature Handle(context.ParentContext, T) error")
 	ErrInvalidEventType        = newEventCode().New("eventType must be a pointer to struct, e.g. (*MyEvent)(nil)")
 	ErrBusClosed               = newEventCode().New("cannot subscribe: event eventBus is closed")
 	ErrPublishOnClosedBus      = newEventCode().New("cannot publish: event eventBus is closed")

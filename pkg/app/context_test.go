@@ -8,19 +8,19 @@ func TestAppContext_Stop(t *testing.T) {
 	ctx := newAppContext(Info{AppName: "test"}, NewContainer(), nil)
 
 	if !ctx.IsRunning() {
-		t.Error("Context should be isRunning after creation")
+		t.Error("ParentContext should be isRunning after creation")
 	}
 
 	ctx.Stop()
 
 	if ctx.IsRunning() {
-		t.Error("Context should not be isRunning after Stop()")
+		t.Error("ParentContext should not be isRunning after Stop()")
 	}
 
 	select {
-	case <-ctx.Ctx().Done():
+	case <-ctx.ParentContext().Done():
 	default:
-		t.Error("Context should be cancelled after Stop()")
+		t.Error("ParentContext should be cancelled after Stop()")
 	}
 
 	if ctx.StopTime().IsZero() {

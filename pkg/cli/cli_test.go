@@ -29,7 +29,7 @@ type mockApplicationContext struct {
 	stopped     bool
 }
 
-func (m *mockApplicationContext) Ctx() context.Context {
+func (m *mockApplicationContext) ParentContext() context.Context {
 	if m.ctx == nil {
 		return context.Background()
 	}
@@ -356,7 +356,7 @@ func (m *mockAppContextWithCancel) AppRegistry() contracts.AppRegistry {
 	return nil
 }
 
-func (m *mockAppContextWithCancel) Ctx() context.Context {
+func (m *mockAppContextWithCancel) ParentContext() context.Context {
 	if m.ctx == nil {
 		return context.Background()
 	}

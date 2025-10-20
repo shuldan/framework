@@ -301,7 +301,7 @@ func newMockAppContext(container contracts.DIContainer) *mockAppContext {
 	}
 }
 
-func (m *mockAppContext) Ctx() context.Context {
+func (m *mockAppContext) ParentContext() context.Context {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.ctx

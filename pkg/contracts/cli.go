@@ -12,7 +12,7 @@ const (
 )
 
 type CliContext interface {
-	Ctx() AppContext
+	AppContext() AppContext
 	Input() io.Reader
 	Output() io.Writer
 	Args() []string

@@ -151,8 +151,8 @@ func LoggingMiddleware(logger contracts.Logger) contracts.HTTPMiddleware {
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			start := time.Now()
-			logCtx := context.WithValue(ctx.Context(), RequestStart, start)
-			ctx.SetContext(logCtx)
+			logCtx := context.WithValue(ctx.ParentContext(), RequestStart, start)
+			ctx.WithParentContext(logCtx)
 			err := next(ctx)
 			duration := time.Since(start)
 			status := ctx.StatusCode()
@@ -247,7 +247,7 @@ func ErrorHandlerMiddleware(errorHandler contracts.ErrorHandler) contracts.HTTPM
 	return func(next contracts.HTTPHandler) contracts.HTTPHandler {
 		return func(ctx contracts.HTTPContext) error {
 			if err := next(ctx); err != nil {
-				_ = errorHandler.Handle(context.WithValue(ctx.Context(), ContextKey, ctx), err)
+				_ = errorHandler.Handle(context.WithValue(ctx.ParentContext(), ContextKey, ctx), err)
 			}
 			return nil
 		}

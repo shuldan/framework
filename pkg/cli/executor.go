@@ -18,8 +18,8 @@ func newExecutor(parser *cmdParser) *cmdExecutor {
 
 func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 	select {
-	case <-commandCtx.Ctx().Ctx().Done():
-		return commandCtx.Ctx().Ctx().Err()
+	case <-commandCtx.AppContext().ParentContext().Done():
+		return commandCtx.AppContext().ParentContext().Err()
 	default:
 	}
 
@@ -33,21 +33,21 @@ func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 	}
 
 	select {
-	case <-commandCtx.Ctx().Ctx().Done():
-		return commandCtx.Ctx().Ctx().Err()
+	case <-commandCtx.AppContext().ParentContext().Done():
+		return commandCtx.AppContext().ParentContext().Err()
 	default:
 	}
 
 	parsedCtx := NewContext(
-		commandCtx.Ctx(),
+		commandCtx.AppContext(),
 		commandCtx.Input(),
 		commandCtx.Output(),
 		parsed.Args,
 	)
 
 	select {
-	case <-parsedCtx.Ctx().Ctx().Done():
-		return parsedCtx.Ctx().Ctx().Err()
+	case <-parsedCtx.AppContext().ParentContext().Done():
+		return parsedCtx.AppContext().ParentContext().Err()
 	default:
 	}
 
@@ -58,8 +58,8 @@ func (e *cmdExecutor) Execute(commandCtx contracts.CliContext) error {
 	}
 
 	select {
-	case <-parsedCtx.Ctx().Ctx().Done():
-		return parsedCtx.Ctx().Ctx().Err()
+	case <-parsedCtx.AppContext().ParentContext().Done():
+		return parsedCtx.AppContext().ParentContext().Err()
 	default:
 	}
 

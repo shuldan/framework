@@ -30,7 +30,7 @@ func NewContext(
 	}
 }
 
-func (c *cmdContext) Ctx() contracts.AppContext {
+func (c *cmdContext) AppContext() contracts.AppContext {
 	return c.appCtx
 }
 

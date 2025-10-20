@@ -98,7 +98,7 @@ func (a *app) Run() error {
 
 	go setupSignalHandler(ctx)
 
-	<-ctx.Ctx().Done()
+	<-ctx.ParentContext().Done()
 
 	var err error
 	if a.shutdownTimeout > 0 {
@@ -141,7 +141,7 @@ func setupSignalHandler(ctx contracts.AppContext) {
 	select {
 	case <-sigChan:
 		ctx.Stop()
-	case <-ctx.Ctx().Done():
+	case <-ctx.ParentContext().Done():
 		return
 	}
 }

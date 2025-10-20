@@ -14,7 +14,7 @@ type DIContainer interface {
 }
 
 type AppContext interface {
-	Ctx() context.Context
+	ParentContext() context.Context
 	Container() DIContainer
 	AppName() string
 	Version() string

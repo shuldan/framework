@@ -19,7 +19,7 @@ func (h *helpAppContext) AppRegistry() contracts.AppRegistry {
 	return nil
 }
 
-func (h *helpAppContext) Ctx() context.Context {
+func (h *helpAppContext) ParentContext() context.Context {
 	return context.Background()
 }
 

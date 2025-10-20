@@ -33,7 +33,7 @@ func newMockCliContext() *mockCliContext {
 	}
 }
 
-func (m *mockCliContext) Ctx() contracts.AppContext {
+func (m *mockCliContext) AppContext() contracts.AppContext {
 	return m.appCtx
 }
 
@@ -74,7 +74,7 @@ func newMockAppContext() *mockAppContext {
 	}
 }
 
-func (m *mockAppContext) Ctx() context.Context {
+func (m *mockAppContext) ParentContext() context.Context {
 	return m.ctx
 }
 
@@ -240,7 +240,7 @@ func testUpCommandExecute(t *testing.T) {
 			t.Errorf("unexpected output: %s", output)
 		}
 
-		if ctx.Ctx().IsRunning() {
+		if ctx.AppContext().IsRunning() {
 			t.Error("app context should be stopped after execution")
 		}
 	})
@@ -719,7 +719,7 @@ func testStatusCommandWithErrors(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 
-		if ctx.Ctx().IsRunning() {
+		if ctx.AppContext().IsRunning() {
 			t.Error("app context should be stopped")
 		}
 	})

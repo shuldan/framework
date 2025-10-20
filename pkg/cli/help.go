@@ -45,14 +45,14 @@ func (h *HelpCommand) Execute(ctx contracts.CliContext) error {
 		if err := h.showCommandHelp(ctx, h.command); err != nil {
 			return err
 		}
-		ctx.Ctx().Stop()
+		ctx.AppContext().Stop()
 		return nil
 	}
 
 	if err := h.showGeneralHelp(ctx); err != nil {
 		return err
 	}
-	ctx.Ctx().Stop()
+	ctx.AppContext().Stop()
 	return nil
 }
 

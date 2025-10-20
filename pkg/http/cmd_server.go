@@ -48,14 +48,14 @@ func (c *serverCommand) Validate(ctx contracts.CliContext) error {
 func (c *serverCommand) Execute(ctx contracts.CliContext) error {
 	serverErr := make(chan error, 1)
 	go func() {
-		err := c.httpServer.Start(ctx.Ctx().Ctx())
+		err := c.httpServer.Start(ctx.AppContext().ParentContext())
 		serverErr <- err
 	}()
 
 	select {
-	case <-ctx.Ctx().Ctx().Done():
+	case <-ctx.AppContext().ParentContext().Done():
 		c.logger.Info("Shutting down HTTP server...")
-		if err := c.httpServer.Stop(ctx.Ctx().Ctx()); err != nil {
+		if err := c.httpServer.Stop(ctx.AppContext().ParentContext()); err != nil {
 			c.logger.Error("Failed to stop HTTP server", "error", err)
 			return err
 		}

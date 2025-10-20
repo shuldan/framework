@@ -48,8 +48,8 @@ type HTTPResponseWriter interface {
 }
 
 type RequestContext interface {
-	Context() context.Context
-	SetContext(ctx context.Context)
+	ParentContext() context.Context
+	WithParentContext(ctx context.Context)
 	Set(key string, value interface{})
 	Get(key string) (interface{}, bool)
 	RequestID() string

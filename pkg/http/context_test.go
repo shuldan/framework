@@ -301,9 +301,9 @@ func TestHTTPContextSetContext(t *testing.T) {
 	originalRequestID := ctx.RequestID()
 
 	newCtx := context.WithValue(context.Background(), customKey, "custom_value")
-	ctx.SetContext(newCtx)
+	ctx.WithParentContext(newCtx)
 
-	if ctx.Context().Value(customKey) != "custom_value" {
+	if ctx.ParentContext().Value(customKey) != "custom_value" {
 		t.Error("Custom context value not set")
 	}
 

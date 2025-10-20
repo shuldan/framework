@@ -68,7 +68,7 @@ func (c *migrationStatusCommand) Execute(ctx contracts.CliContext) error {
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	ctx.Ctx().Stop()
+	ctx.AppContext().Stop()
 	return nil
 }
 

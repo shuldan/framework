@@ -182,7 +182,7 @@ func (m *mockAppContext) AppRegistry() contracts.AppRegistry {
 	return nil
 }
 
-func (m *mockAppContext) Ctx() context.Context             { return m.ctx }
+func (m *mockAppContext) ParentContext() context.Context   { return m.ctx }
 func (m *mockAppContext) Container() contracts.DIContainer { return m.container }
 func (m *mockAppContext) AppName() string                  { return "testapp" }
 func (m *mockAppContext) Version() string                  { return "1.0.0" }

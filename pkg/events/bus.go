@@ -37,7 +37,7 @@ func adapterFromFunction(fn any) (*listenerAdapter, error) {
 	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
 
 	if !ctxType.Implements(contextType) {
-		return nil, ErrInvalidListenerFunction.WithDetail("reason", "first argument must implement context.Context")
+		return nil, ErrInvalidListenerFunction.WithDetail("reason", "first argument must implement context.ParentContext")
 	}
 	if fnType.Out(0) != errorType {
 		return nil, ErrInvalidListenerFunction.WithDetail("reason", "return type must be error")
@@ -70,7 +70,7 @@ func adapterFromMethod(receiver reflect.Value, method reflect.Method) (*listener
 	contextType := reflect.TypeOf((*context.Context)(nil)).Elem()
 
 	if !ctxType.Implements(contextType) {
-		return nil, ErrInvalidListenerMethod.WithDetail("reason", "first argument must implement context.Context")
+		return nil, ErrInvalidListenerMethod.WithDetail("reason", "first argument must implement context.ParentContext")
 	}
 	if fnType.NumOut() != 1 || fnType.Out(0) != errorType {
 		return nil, ErrInvalidListenerMethod.WithDetail("reason", "must return error")

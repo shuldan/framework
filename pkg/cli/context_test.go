@@ -24,7 +24,7 @@ func (s *simpleAppContext) AppRegistry() contracts.AppRegistry {
 	return nil
 }
 
-func (s *simpleAppContext) Ctx() context.Context {
+func (s *simpleAppContext) ParentContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
@@ -69,7 +69,7 @@ func TestContext(t *testing.T) {
 
 	ctx := NewContext(appCtx, input, output, args)
 
-	if ctx.Ctx() != appCtx {
+	if ctx.AppContext() != appCtx {
 		t.Error("Expected same application context")
 	}
 
