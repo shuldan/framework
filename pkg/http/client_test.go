@@ -479,3 +479,105 @@ func TestClientRetryWithNilResponse(t *testing.T) {
 		t.Error("Expected error for closed server")
 	}
 }
+
+func TestClientGetWithHeaders(t *testing.T) {
+	t.Parallel()
+
+	var receivedHeaders http.Header
+	var receivedMethod string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		receivedMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient(logger)
+
+	_, err := client.Get(context.Background(), server.URL,
+		WithHeader("Authorization", "Bearer test-token"),
+		WithHeader("X-Custom-Header", "custom-value"))
+
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+
+	if receivedMethod != "GET" {
+		t.Errorf("Expected method GET, got %s", receivedMethod)
+	}
+
+	if auth := receivedHeaders.Get("Authorization"); auth != "Bearer test-token" {
+		t.Errorf("Expected Authorization header 'Bearer test-token', got '%s'", auth)
+	}
+
+	if custom := receivedHeaders.Get("X-Custom-Header"); custom != "custom-value" {
+		t.Errorf("Expected X-Custom-Header 'custom-value', got '%s'", custom)
+	}
+}
+
+func TestClientPostWithHeaders(t *testing.T) {
+	t.Parallel()
+
+	var receivedHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient(logger)
+
+	headers := map[string]string{
+		"Authorization": "Bearer test-token",
+		"Content-Type":  "application/json",
+		"X-API-Key":     "test-key",
+	}
+
+	_, err := client.Post(context.Background(), server.URL, map[string]string{"test": "data"},
+		WithHeaders(headers))
+
+	if err != nil {
+		t.Fatalf("POST request failed: %v", err)
+	}
+
+	if auth := receivedHeaders.Get("Authorization"); auth != "Bearer test-token" {
+		t.Errorf("Expected Authorization header 'Bearer test-token', got '%s'", auth)
+	}
+
+	if apiKey := receivedHeaders.Get("X-API-Key"); apiKey != "test-key" {
+		t.Errorf("Expected X-API-Key header 'test-key', got '%s'", apiKey)
+	}
+}
+
+func TestHeadersAreSent(t *testing.T) {
+	var receivedAuthHeader string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuthHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient(logger)
+
+	_, err := client.Get(context.Background(), server.URL,
+		WithHeader("Authorization", "Bearer test-token"))
+
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+
+	if receivedAuthHeader != "Bearer test-token" {
+		t.Errorf("Expected Authorization header 'Bearer test-token', got '%s'", receivedAuthHeader)
+	}
+}

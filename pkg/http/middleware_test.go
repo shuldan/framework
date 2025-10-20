@@ -540,3 +540,296 @@ func TestHSTSMiddlewareNoTLS(t *testing.T) {
 		t.Error("Expected no HSTS header without TLS")
 	}
 }
+
+func TestRequestIDMiddlewareConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Disabled by default", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+
+		middlewares := LoadMiddlewareFromConfig(mockCfg, logger)
+		found := false
+		for _, m := range middlewares {
+			testHandler := func(ctx contracts.HTTPContext) error {
+				return nil
+			}
+			wrapped := m(testHandler)
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			httpCtx := NewHTTPContext(w, req, logger)
+
+			_ = wrapped(httpCtx)
+
+			if w.Header().Get("X-Request-ID") != "" {
+				found = true
+				break
+			}
+		}
+
+		if found {
+			t.Error("Expected RequestID middleware to be disabled by default")
+		}
+
+		messages := logger.getMessages()
+		requestIDFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Request ID middleware enabled") {
+				requestIDFound = true
+				break
+			}
+		}
+		if requestIDFound {
+			t.Error("Expected no Request ID middleware enabled message")
+		}
+	})
+
+	t.Run("Explicitly disabled", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{
+						"request_id": map[string]interface{}{
+							"enabled": false,
+						},
+					},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+
+		middlewares := LoadMiddlewareFromConfig(mockCfg, logger)
+
+		found := false
+		for _, m := range middlewares {
+			testHandler := func(ctx contracts.HTTPContext) error {
+				return nil
+			}
+			wrapped := m(testHandler)
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			httpCtx := NewHTTPContext(w, req, logger)
+
+			_ = wrapped(httpCtx)
+
+			if w.Header().Get("X-Request-ID") != "" {
+				found = true
+				break
+			}
+		}
+
+		if found {
+			t.Error("Expected RequestID middleware to be disabled when explicitly disabled")
+		}
+
+		messages := logger.getMessages()
+		requestIDFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Request ID middleware enabled") {
+				requestIDFound = true
+				break
+			}
+		}
+		if requestIDFound {
+			t.Error("Expected no Request ID middleware enabled message when disabled")
+		}
+	})
+
+	t.Run("Enabled correctly", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{
+						"request_id": map[string]interface{}{
+							"enabled": true,
+						},
+					},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+
+		middlewares := LoadMiddlewareFromConfig(mockCfg, logger)
+
+		found := false
+		var requestIDMiddleware contracts.HTTPMiddleware
+		for _, m := range middlewares {
+			testHandler := func(ctx contracts.HTTPContext) error {
+				return nil
+			}
+			wrapped := m(testHandler)
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			httpCtx := NewHTTPContext(w, req, logger)
+
+			_ = wrapped(httpCtx)
+
+			if w.Header().Get("X-Request-ID") != "" {
+				found = true
+				requestIDMiddleware = m
+				break
+			}
+		}
+
+		if !found {
+			t.Error("Expected RequestID middleware to be enabled")
+		}
+
+		messages := logger.getMessages()
+		requestIDFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Request ID middleware enabled") {
+				requestIDFound = true
+				break
+			}
+		}
+		if !requestIDFound {
+			t.Error("Expected Request ID middleware enabled message")
+		}
+
+		if requestIDMiddleware != nil {
+			handler := func(ctx contracts.HTTPContext) error {
+				return ctx.JSON(map[string]string{"test": "ok"})
+			}
+			wrappedHandler := requestIDMiddleware(handler)
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			httpCtx := NewHTTPContext(w, req, logger)
+
+			if err := wrappedHandler(httpCtx); err != nil {
+				t.Fatalf("Handler failed: %v", err)
+			}
+
+			requestID := w.Header().Get("X-Request-ID")
+			if requestID == "" {
+				t.Error("Expected X-Request-ID header to be set")
+			}
+
+			if requestID != httpCtx.RequestID() {
+				t.Errorf("Expected X-Request-ID header to match ctx.RequestID(): got %s, want %s",
+					requestID, httpCtx.RequestID())
+			}
+		}
+	})
+}
+
+func TestRecoveryMiddlewareConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Disabled by default", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+
+		LoadMiddlewareFromConfig(mockCfg, logger)
+
+		messages := logger.getMessages()
+		recoveryFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Recovery middleware enabled") {
+				recoveryFound = true
+				break
+			}
+		}
+		if recoveryFound {
+			t.Error("Expected no Recovery middleware enabled message")
+		}
+	})
+
+	t.Run("Explicitly disabled", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{
+						"recovery": map[string]interface{}{
+							"enabled": false,
+						},
+					},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+
+		LoadMiddlewareFromConfig(mockCfg, logger)
+
+		messages := logger.getMessages()
+		recoveryFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Recovery middleware enabled") {
+				recoveryFound = true
+				break
+			}
+		}
+		if recoveryFound {
+			t.Error("Expected no Recovery middleware enabled message when disabled")
+		}
+	})
+
+	t.Run("Enabled correctly", func(t *testing.T) {
+		configData := map[string]interface{}{
+			"http": map[string]interface{}{
+				"server": map[string]interface{}{
+					"middleware": map[string]interface{}{
+						"recovery": map[string]interface{}{
+							"enabled": true,
+						},
+					},
+				},
+			},
+		}
+		mockCfg := &mockConfig{data: configData}
+		logger := &mockLogger{}
+		middlewares := LoadMiddlewareFromConfig(mockCfg, logger)
+		messages := logger.getMessages()
+		recoveryFound := false
+		for _, msg := range messages {
+			if strings.Contains(msg, "Recovery middleware enabled") {
+				recoveryFound = true
+				break
+			}
+		}
+		if !recoveryFound {
+			t.Fatal("Expected Recovery middleware enabled message")
+		}
+		handler := func(ctx contracts.HTTPContext) error {
+			panic("test panic")
+		}
+		wrappedHandler := handler
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			wrappedHandler = middlewares[i](wrappedHandler)
+		}
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+		httpCtx := NewHTTPContext(w, req, logger)
+		err := wrappedHandler(httpCtx)
+		if err != nil {
+			if !strings.Contains(err.Error(), "panic recovered") {
+				t.Errorf("Expected panic to be recovered, got error: %v", err)
+			}
+		}
+		if w.Code == 0 {
+			t.Error("Expected response status to be set by recovery middleware")
+		}
+	})
+}

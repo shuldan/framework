@@ -32,6 +32,12 @@ func LoadMiddlewareFromConfig(config contracts.Config, logger contracts.Logger) 
 		if m := loadErrorHandlerMiddleware(sub, logger); m != nil {
 			middlewares = append(middlewares, m)
 		}
+		if m := loadRequestIDMiddleware(sub, logger); m != nil {
+			middlewares = append(middlewares, m)
+		}
+		if m := loadRecoveryMiddleware(sub, logger); m != nil {
+			middlewares = append(middlewares, m)
+		}
 	}
 
 	return middlewares
@@ -121,6 +127,22 @@ func loadErrorHandlerMiddleware(sub contracts.Config, logger contracts.Logger) c
 		}
 
 		return ErrorHandlerMiddleware(NewErrorHandler(cfg, logger))
+	}
+	return nil
+}
+
+func loadRequestIDMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
+	if reqIDSub, ok := sub.GetSub("request_id"); ok && reqIDSub.GetBool("enabled", false) {
+		logger.Info("Request ID middleware enabled")
+		return RequestIDMiddleware()
+	}
+	return nil
+}
+
+func loadRecoveryMiddleware(sub contracts.Config, logger contracts.Logger) contracts.HTTPMiddleware {
+	if recoverySub, ok := sub.GetSub("recovery"); ok && recoverySub.GetBool("enabled", false) {
+		logger.Info("Recovery middleware enabled")
+		return RecoveryMiddleware(logger)
 	}
 	return nil
 }
