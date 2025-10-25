@@ -27,11 +27,6 @@ type Memento interface {
 	GetID() ID
 }
 
-type Transaction interface {
-	Commit() error
-	Rollback() error
-}
-
 type Migration interface {
 	ID() string
 	ConnectionName() string
@@ -58,36 +53,23 @@ type Database interface {
 	Migrate(migrations []Migration) error
 	Rollback(steps int, migrations []Migration) error
 	Status() ([]MigrationStatus, error)
-	BeginTx(ctx context.Context) (Transaction, error)
 	Connection() *sql.DB
 }
 
 type Finder[T Aggregate, I ID] interface {
 	Find(ctx context.Context, id I) (T, error)
 	FindAll(ctx context.Context, limit, offset int) ([]T, error)
-	FindBy(ctx context.Context, criteria map[string]interface{}) ([]T, error)
-	Exists(ctx context.Context, id I) (bool, error)
-	Count(ctx context.Context, criteria map[string]interface{}) (int64, error)
+	FindBy(ctx context.Context, conditions string, args []any) ([]T, error)
+	ExistsBy(ctx context.Context, conditions string, args []any) (bool, error)
+	CountBy(ctx context.Context, conditions string, args []any) (int64, error)
 }
 
 type Writer[T Aggregate, I ID] interface {
 	Save(ctx context.Context, aggregate T) error
 	Delete(ctx context.Context, id I) error
-	DeleteBy(ctx context.Context, criteria map[string]interface{}) (int64, error)
 }
 
 type Repository[T Aggregate, I ID] interface {
 	Finder[T, I]
 	Writer[T, I]
-}
-
-type TransactionalRepository[T Aggregate, I ID] interface {
-	Repository[T, I]
-	WithTx(tx Transaction) Repository[T, I]
-}
-
-type StrategyRepository[T Aggregate, I ID] interface {
-	TransactionalRepository[T, I]
-	WithStrategy(strategy LoadingStrategy) Repository[T, I]
-	GetStrategy() LoadingStrategy
 }

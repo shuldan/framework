@@ -131,44 +131,6 @@ func TestDatabaseOperationsWithoutConnection(t *testing.T) {
 	if !errors.Is(err, ErrDatabaseNotConnected) {
 		t.Errorf("expected ErrDatabaseNotConnected, got %v", err)
 	}
-
-	_, err = db.BeginTx(ctx)
-	if !errors.Is(err, ErrDatabaseNotConnected) {
-		t.Errorf("expected ErrDatabaseNotConnected, got %v", err)
-	}
-}
-
-func TestDatabaseTransaction(t *testing.T) {
-	db := NewDatabase("sqlite3", ":memory:")
-	if err := db.Connect(); err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-
-	defer func(db contracts.Database) {
-		if err := db.Close(); err != nil {
-			t.Logf("failed to close database: %v", err)
-		}
-	}(db)
-
-	ctx := context.Background()
-
-	tx, err := db.BeginTx(ctx)
-	if err != nil {
-		t.Fatalf("failed to begin transaction: %v", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Errorf("failed to commit transaction: %v", err)
-	}
-
-	tx, err = db.BeginTx(ctx)
-	if err != nil {
-		t.Fatalf("failed to begin transaction: %v", err)
-	}
-
-	if err := tx.Rollback(); err != nil {
-		t.Errorf("failed to rollback transaction: %v", err)
-	}
 }
 
 func TestDatabaseOptions(t *testing.T) {

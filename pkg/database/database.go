@@ -179,53 +179,6 @@ func (d *sqlDatabase) Status() ([]contracts.MigrationStatus, error) {
 	return runner.Status()
 }
 
-func (d *sqlDatabase) BeginTx(ctx context.Context) (contracts.Transaction, error) {
-	if d.db == nil {
-		return nil, ErrDatabaseNotConnected
-	}
-
-	d.mu.Lock()
-	db := d.db
-	d.mu.Unlock()
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, ErrTransactionFailed.
-			WithDetail("reason", err.Error()).
-			WithCause(err)
-	}
-
-	return &sqlTransaction{tx: tx}, nil
-}
-
 func (d *sqlDatabase) Connection() *sql.DB {
 	return d.db
-}
-
-type sqlTransaction struct {
-	tx *sql.Tx
-}
-
-func (t *sqlTransaction) Commit() error {
-	err := t.tx.Commit()
-	if err != nil {
-		return ErrTransactionFailed.
-			WithDetail("reason", "commit failed").
-			WithCause(err)
-	}
-	return nil
-}
-
-func (t *sqlTransaction) Rollback() error {
-	err := t.tx.Rollback()
-	if err != nil {
-		return ErrTransactionFailed.
-			WithDetail("reason", "rollback failed").
-			WithCause(err)
-	}
-	return nil
-}
-
-func (t *sqlTransaction) getConnection() *sql.Tx {
-	return t.tx
 }
