@@ -71,12 +71,12 @@ jobs:
       - name: Run benchmarks
         run: go test -bench=. -benchmem ./... -run=^$ || true
 
-#      - name: Upload coverage to Codecov
-#        uses: codecov/codecov-action@v5
-#        with:
-#          files: ./coverage.out
-#          token: ${{ secrets.CODECOV_TOKEN }}
-#        if: github.ref == 'refs/heads/main'
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+        if: github.ref == 'refs/heads/main'
 
   security:
     runs-on: ubuntu-latest
