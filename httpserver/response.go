@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	domainerrors "github.com/shuldan/errors"
@@ -19,7 +21,7 @@ func JSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	_, _ = w.Write(buf)
+	_, _ = io.Copy(w, bytes.NewReader(buf))
 }
 
 func OK(w http.ResponseWriter, data any) {
