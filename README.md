@@ -1,552 +1,1230 @@
-# Shuldan Framework
+# `framework` — Модульный фреймворк для DDD-приложений на Go
 
 [![Go CI](https://github.com/shuldan/framework/workflows/Go%20CI/badge.svg)](https://github.com/shuldan/framework/actions)
 [![codecov](https://codecov.io/gh/shuldan/framework/branch/main/graph/badge.svg)](https://codecov.io/gh/shuldan/framework)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shuldan/framework)](https://goreportcard.com/report/github.com/shuldan/framework)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Shuldan Framework** — модульный, расширяемый Go-фреймворк для создания высоконагруженных серверных приложений.  
-Он предоставляет готовые компоненты для HTTP, CLI, очередей, DI, логирования, событий и управления жизненным циклом.
+Фреймворк для создания Go-приложений по принципам Domain-Driven Design. Тонкий Kernel, manual wiring, ленивая инициализация. Один бинарь — HTTP-сервер, воркеры очередей, миграции и утилиты через CLI-команды.
+
+Построен на экосистеме пакетов [`shuldan`](https://github.com/shuldan): `app`, `cli`, `config`, `errors`, `events`, `migrator`, `queue`, `repository`.
+
+---
+
+## 🚀 Основные возможности
+
+- **Тонкий Kernel** — знает только о конфигурации и логгере. Не знает о базе данных, очередях, событиях
+- **Manual wiring** — зависимости передаются через конструкторы. Нет магии, нет DI-контейнера
+- **Ленивая инициализация** — `Lazy[T]` создаёт компоненты по требованию. `config:dump` не трогает Redis
+- **Один бинарь** — `serve`, `migrate:up`, `queue:work`, `health` через CLI
+- **Расширяемость без ломки** — новый компонент (cache, search, ...) = 0 изменений в framework
+- **Компоненты опциональны** — API Gateway без БД, Worker без HTTP
+- **HTTP-сервер** — обёртка Go 1.22+ `ServeMux` с middleware, группами, error-хелперами
+- **Множество БД** — именованные подключения с отдельными пулами и миграциями
+- **Event → Queue relay** — выборочная пересылка доменных событий в очередь
+- **Structured logging** — единый `slog`-логгер для всех компонентов
+- **Domain errors → HTTP** — автоматический маппинг `errors.Kind` в HTTP-статус и JSON
+
+---
+
+## 📦 Установка
+
+```sh
+go get github.com/shuldan/framework
+```
+
+Требуется Go 1.24+.
+
+---
+
+## 🏗️ Архитектура
+
+### Принцип
+
+```
+Kernel  ──→  знает только о cfg + log + CLI
+  │
+  │  main.go / bootstrap: manual wiring
+  │
+  ├── database.Manager     ← опционально
+  ├── eventbus.Module      ← опционально
+  ├── httpserver.Module    ← опционально
+  ├── queueworker.Module  ← опционально
+  ├── migration.Runner     ← опционально
+  └── DDD Modules          ← получают зависимости через конструкторы
+```
+
+Kernel **никогда не меняется** при добавлении новых инфраструктурных компонентов. Новый пакет (cache, search, scheduler) подключается в `main.go` без изменений framework.
+
+### Ленивая инициализация
+
+```
+config:dump   → ничего не создаётся
+health        → только БД (Lazy.Get())
+migrate:up    → только БД
+queue:work    → БД + Events + Queue
+serve         → всё
+```
+
+`Lazy[T]` гарантирует: каждый компонент создаётся **ровно один раз** (`sync.Once`), даже при запросе из нескольких модулей.
+
+---
+
+## 📖 Содержание
+
+- [Быстрый старт](#-быстрый-старт)
+- [Kernel](#kernel)
+- [Lazy[T]](#lazyt)
+- [Logger](#logger)
+- [HTTP Server](#http-server)
+    - [Router](#router)
+    - [Request / Response](#request--response)
+    - [Middleware](#middleware)
+    - [Domain Errors → HTTP](#domain-errors--http)
+- [Database Manager](#database-manager)
+- [EventBus](#eventbus)
+- [Event → Queue Relay](#event--queue-relay)
+- [Queue Worker](#queue-worker)
+- [Migration Runner](#migration-runner)
+- [CLI-команды](#cli-команды)
+- [Сценарии использования](#-сценарии-использования)
+- [Структура DDD-модуля](#структура-ddd-модуля)
+- [Структура пакетов](#структура-пакетов)
+- [Разработка](#-разработка)
 
 ---
 
 ## 🚀 Быстрый старт
 
+### Минимальный HTTP-сервер
+
 ```go
 package main
 
 import (
-    "log"
-	"github.com/shuldan/framework/pkg/bootstrap"
-	"github.com/shuldan/framework/pkg/contracts"
+    "context"
+    "fmt"
+    "net/http"
+    "os"
+    "time"
+
+    "github.com/shuldan/cli"
+    "github.com/shuldan/config"
+
+    "github.com/shuldan/framework"
+    "github.com/shuldan/framework/command"
+    "github.com/shuldan/framework/httpserver"
+    "github.com/shuldan/framework/httpserver/middleware"
 )
 
 func main() {
-	boot := bootstrap.New("test", "dev", "TEST")
-	boot.WithLogger()
-	boot.WithHTTPServer()
-	boot.WithCli()
+    k, err := framework.NewKernel(
+        framework.WithConfigFile("config.yaml"),
+        framework.WithEnvPrefix("APP_"),
+    )
+    if err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
 
-	application, err := boot.CreateApp()
-	if err != nil {
-		log.Fatalf("Application initialization failed: %v", err)
-	}
+    log := k.Logger()
 
-	if err := application.Run(); err != nil {
-		log.Fatalf("Application run failed: %v", err)
-	}
+    // Router
+    router := httpserver.NewRouter()
+    router.Use(
+        middleware.Recovery(log.Error),
+        middleware.RequestID(),
+        middleware.Logging(log.Info),
+    )
+    router.GET("/ping", func(w http.ResponseWriter, _ *http.Request) {
+        httpserver.OK(w, map[string]string{"status": "ok"})
+    })
+
+    // HTTP Server module
+    server := httpserver.NewModule(router, httpserver.Config{
+        Host: k.Config().GetString("server.host", "0.0.0.0"),
+        Port: k.Config().GetInt("server.port", 8080),
+    })
+
+    // CLI
+    k.Command(
+        command.Serve("myapp", log, 15*time.Second, server),
+        command.Health(),
+        command.ConfigDump(k.Config()),
+    )
+
+    if err := k.Run(context.Background(), os.Args[1:]); err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(cli.GetExitCode(err))
+    }
 }
 ```
 
-Запуск:
-```bash
-go run main.go http:serve
+```sh
+myapp serve          # Запуск HTTP-сервера
+myapp health         # Проверка здоровья
+myapp config:dump    # Вывод конфигурации
+myapp help           # Справка
 ```
 
 ---
 
-## 🧱 Архитектура
+## Kernel
 
-```mermaid
-graph TD
-    subgraph "Shuldan Framework Core"
-        A[App] --> B[Registry]
-        A --> C[Container DI]
-        A --> D[AppContext]
-    end
+Точка входа фреймворка. Знает только о конфигурации, логгере и CLI.
 
-    subgraph "Модули приложения"
-        B --> M1[CLI Module]
-        B --> M2[Logger Module]
-        B --> M3[Config Module]
-        B --> M4[HTTP Module]
-        B --> M5[Events Module]
-        B --> M6[Queue Module]
-        B --> M7[Database Module]
-    end
-
-    subgraph "DI Container"
-        C --> F1[Factory]
-        C --> F2[Instance]
-        C --> F3[Resolve]
-        F1 -->|depends on| C
-        F2 -->|cached| C
-    end
-
-    subgraph "HTTP Module"
-        M4 --> H1[HTTP Server]
-        H1 --> H2[Router]
-        H1 --> H3[Middlewares]
-        H3 --> CORS[CORS]
-        H3 --> LoggerMiddleware[Logger]
-        H3 --> Recovery[Recovery]
-        H1 --> H4[Context]
-        H4 --> WebSockets[WebSockets]
-        H4 --> Streaming[Streaming]
-        H4 --> FileUpload[File Upload]
-    end
-
-    subgraph "Queue Module"
-        M6 --> Q1[Producer]
-        M6 --> Q2[Consumer]
-        Q2 --> Q3[Redis Broker]
-        Q2 --> Q4[Memory Broker]
-        Q1 -->|Publish| Q3
-        Q2 -->|Consume| Q3
-        Q2 -->|Process| Handler[Job Handler]
-    end
-
-    subgraph "Events Module"
-        M5 --> E1[Event Bus]
-        E1 --> E2[Subscribe]
-        E2 --> Listener[Listener Func]
-        E1 --> E3[Publish]
-        E3 --> E1
-    end
-
-    subgraph "Database Module"
-        M7 --> R1[Repository]
-        R1 --> R2[Transactional]
-        R1 --> R3[Find Save Delete]
-        M7 --> QBuilder[QueryBuilder]
-        M7 --> Migration[Migration Runner]
-        Migration --> SQL[SQL Dialect]
-    end
-
-    subgraph "Config Module"
-        M3 --> L1[Config Loader]
-        L1 --> JSON[JSON Loader]
-        L1 --> YAML[YAML Loader]
-        L1 --> ENV[Env Loader]
-        L1 --> CLI[CLI Flags Loader]
-        L1 --> Chain[ChainLoader]
-    end
-
-    subgraph "CLI Module"
-        M1 --> C1[Command Registry]
-        C1 --> CMD1[Command: serve]
-        C1 --> CMD2[Command: migrate]
-        C1 --> CMD3[Command: help]
-        CMD3 --> Help[Auto-generated Help]
-    end
-
-    subgraph "Logger Module"
-        M2 --> L[Logger]
-        L --> Text[Text Handler]
-        L --> JSON[JSON Handler]
-        L --> Color[Color Output]
-        L --> Context[With ...]
-    end
-
-    subgraph "Ошибки и утилиты"
-        Err[Errors] --> Code[Error Codes]
-        Err --> Detail[WithDetail ...]
-        Err --> Cause[WithCause ...]
-        Err --> Stack[Stack Trace]
-        D[Traits] --> UUID[UUID ID]
-        D --> IntID[Int64 ID]
-        D --> StringID[String ID]
-    end
-
-    A -->|управляет| M1
-    A -->|управляет| M2
-    A -->|управляет| M3
-    A -->|управляет| M4
-    A -->|управляет| M5
-    A -->|управляет| M6
-    A -->|управляет| M7
-
-    C -->|внедряет| M2
-    C -->|внедряет| M3
-    C -->|внедряет| M4
-    C -->|внедряет| M5
-    C -->|внедряет| M6
-    C -->|внедряет| M7
-
-    M3 -->|загружает| C
-    M3 -->|настраивает| M2
-    M3 -->|настраивает| M4
-    M3 -->|настраивает| M6
-
-    style A fill:#4C72B0,stroke:#333,color:white
-    style B fill:#55A868,stroke:#333,color:white
-    style C fill:#8C564B,stroke:#333,color:white
-    style D fill:#D62728,stroke:#333,color:white
-    classDef module fill:#1F77B4,stroke:#333,color:white;
-    class M1,M2,M3,M4,M5,M6,M7 module
-```
-
----
-
-## 🔧 Основные компоненты
-
-### 1. **App — Ядро приложения**
-
-Управляет жизненным циклом: регистрация модулей, запуск, остановка, graceful shutdown.
-
-#### 📌 Ключевые возможности:
-- Регистрация модулей (`AppModule`)
-- Гибкий таймаут graceful shutdown
-- Интеграция с DI-контейнером
-- Поддержка `context.AppContext`
-
-#### 💡 Пример:
 ```go
-application, _ := boot.CreateApp()
-application.Register(NewMyModule())
-application.Run()
+k, err := framework.NewKernel(
+    framework.WithConfigFile("config.yaml"),    // YAML-файл (default)
+    framework.WithEnvPrefix("APP_"),            // APP_SERVER__PORT=9090
+    framework.WithProfileEnv("APP_ENV"),        // config.production.yaml
+)
 ```
 
----
+### Методы
 
-### 2. **DI Container — Внедрение зависимостей**
+| Метод | Описание |
+|-------|----------|
+| `Config() *config.Config` | Загруженная конфигурация |
+| `Logger() *logger.Logger` | Structured-логгер |
+| `Command(cmds ...cli.Command)` | Регистрация CLI-команд |
+| `OnShutdown(fn func())` | Callback при завершении (LIFO) |
+| `Run(ctx, args) error` | Парсинг args → выполнение команды |
+| `RunWith(ctx, in, out, args) error` | То же, с кастомным I/O (для тестов) |
 
-Контейнер для управления зависимостями: регистрация фабрик, разрешение, кэширование.
+### Опции
 
-#### 📌 Возможности:
-- Поддержка `Factory`, `Instance`
-- Защита от циклических зависимостей
-- Lazy-инициализация
-- Проверка на дубликаты
+| Опция | Описание |
+|-------|----------|
+| `WithConfigFile(paths...)` | Пути к конфиг-файлам. Пустой список = без файлов |
+| `WithEnvPrefix(prefix)` | Загрузка из ENV с авто-парсингом типов |
+| `WithProfileEnv(envVar)` | Профильные конфиги: `config.production.yaml` |
+| `WithLogger(log)` | Предсобранный логгер (bypass конфига) |
+| `WithConfig(cfg)` | Предсобранная конфигурация (для тестов) |
 
-#### 💡 Пример:
+### OnShutdown для Lazy-ресурсов
+
 ```go
-container := NewContainer()
-container.Instance("logger", myLogger)
-container.Factory("db", func(c DIContainer) (interface{}, error) {
-    return NewDatabase(c.Resolve("config")), nil
+dbm := framework.NewLazy(func() (*database.Manager, error) {
+    return database.NewManager(configs, log)
+})
+
+k.OnShutdown(func() {
+    dbm.IfCreated(func(m *database.Manager) {
+        _ = m.Stop(context.Background())
+    })
 })
 ```
 
 ---
 
-### 3. **Logger — Структурированное логирование**
+## Lazy[T]
 
-Интеграция с `log/slog`, цветной вывод, уровни, контекст.
+Потокобезопасная ленивая инициализация. Фабрика вызывается ровно один раз.
 
-#### 📌 Возможности:
-- Поддержка `text` и `JSON` форматов
-- Цвета в терминале
-- Добавление контекста через `With(...)`
-- Уровни: `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`
-
-#### 💡 Пример:
 ```go
-log := container.Get("logger").(logger.Logger)
-log.Info("User logged in", "user_id", "123")
-scopedLog := log.With("service", "auth")
-scopedLog.Error("Auth failed", "error", err)
+dbm := framework.NewLazy(func() (*database.Manager, error) {
+    return database.NewManager(configs, log)
+})
+
+// Первый вызов — создаёт. Последующие — возвращают кэш.
+manager, err := dbm.Get()
+
+// Паника при ошибке
+manager := dbm.MustGet()
+
+// Был ли создан успешно?
+if dbm.IsCreated() { ... }
+
+// Callback только если создан (для shutdown)
+dbm.IfCreated(func(m *database.Manager) {
+    _ = m.Stop(ctx)
+})
 ```
 
-#### ⚙️ Конфигурация:
+| Метод | Описание |
+|-------|----------|
+| `Get() (T, error)` | Создаёт при первом вызове, кэширует результат |
+| `MustGet() T` | Паника при ошибке |
+| `IsCreated() bool` | `true` если фабрика вернула без ошибки |
+| `IfCreated(func(T))` | Callback только для успешно созданных значений |
+
+---
+
+## Logger
+
+Structured-логгер на базе `slog`. Совместим с `app.Logger`, `config.Logger` и `migrator.Logger` через structural typing.
+
+```go
+// Из конфигурации
+log := logger.New(logger.Config{
+    Level:  "info",     // debug, info, warn, error
+    Format: "json",     // json, text
+    Output: "stdout",   // stdout, stderr
+})
+
+// Методы
+log.Info("server started", "port", 8080)
+log.Error("connection failed", "error", err)
+log.Debug("query executed", "sql", query, "duration", d)
+log.Warn("deprecated endpoint", "path", "/old")
+
+// Дочерний логгер с контекстом
+moduleLog := log.With("module", "orders")
+moduleLog.Info("order created", "id", orderID)
+
+// Для тестов — запись в буфер
+var buf bytes.Buffer
+testLog := logger.NewWithWriter(&buf, logger.Config{Level: "debug"})
+```
+
+Конфигурация из YAML:
+
 ```yaml
-logger:
-  level: "error"
-  format: "json"
-  output: "stdout"
-  base_dir: "./logs"
-  file_path: "./app.log"
-  enable_colors: false
-  include_caller: false
+log:
+  level: info
+  format: json
+  output: stdout
 ```
 
 ---
 
-### 4. **HTTP — Модуль HTTP-сервера**
+## HTTP Server
 
-Полноценный HTTP-сервер с поддержкой:
-- REST, WebSockets
-- Файловых загрузок
-- Потоковой передачи
-- Контекста запроса
-- Обработки ошибок
+### Router
 
-#### 💡 Пример:
+Обёртка Go 1.22+ `http.ServeMux` с поддержкой middleware и групп.
+
 ```go
-ctx.Status(200).JSON(map[string]string{"message": "ok"})
-ctx.FileUpload().FormFile("avatar")
-ctx.Websocket().Upgrade()
-ctx.Streaming().WriteStringChunk("Hello")
+router := httpserver.NewRouter()
+
+// Глобальный middleware
+router.Use(
+    middleware.Recovery(log.Error),
+    middleware.RequestID(),
+    middleware.Logging(log.Info),
+)
+
+// Маршруты
+router.GET("/health", healthHandler)
+router.POST("/users", createUserHandler)
+
+// Группы с префиксом и middleware
+api := router.Group("/api/v1", authMiddleware)
+api.GET("/orders", listOrdersHandler)
+api.GET("/orders/{id}", getOrderHandler)
+api.POST("/orders", createOrderHandler)
+
+admin := router.Group("/admin", adminAuthMiddleware)
+admin.DELETE("/users/{id}", deleteUserHandler)
 ```
 
-#### ⚙️ Конфигурация:
-```yaml
-http:
-  server:
-    address: "localhost:8080"
-    shutdown_timeout: 30
-    read_timeout: 5
-    write_timeout: 10
-    max_body_size: 4194304  # 4 MB
-    middleware:
-      security_headers:
-        enabled: true
-        csp: "default-src 'self'; script-src 'self' 'unsafe-inline';"
-        x_frame_options: "DENY"
-        x_xss_protection: "1; mode=block"
-        referrer_policy: "strict-origin-when-cross-origin"
-      hsts:
-        enabled: true
-        max_age: 31536000
-        include_subdomains: true
-        preload: true
-      cors:
-        enabled: true
-        allow_origins:
-          - "https://example.com"
-          - "http://localhost:3000"
-        allow_methods:
-          - "GET"
-          - "POST"
-          - "PUT"
-          - "DELETE"
-          - "OPTIONS"
-        allow_headers:
-          - "Origin"
-          - "Content-Type"
-          - "Authorization"
-        allow_credentials: true
-        max_age: 86400
-      logging:
-        enabled: true
-      error_handler:
-        enabled: false
-        show_stack_trace: false
-        show_details: false
-        log_level: "warn"
-        status_codes:
-          "ERR_VALIDATION": 400
-          "ERR_AUTH": 401
-          "ERR_FORBIDDEN": 403
-          "ERR_NOT_FOUND": 404
-          "ERR_INTERNAL": 500
-          "ERR_TIMEOUT": 408
-          "ERR_UNPROCESSABLE": 422
-          "ERR_UNAVAILABLE": 503
-        user_messages:
-          "ERR_INTERNAL": "Internal server error. Please try again later."
-          "ERR_TIMEOUT": "Request timed out. Please try again."
-          "ERR_UNAVAILABLE": "Service temporarily unavailable."
-          "ERR_VALIDATION": "One or more validation errors occurred."
-          "ERR_AUTH": "Authentication required."
-          "ERR_FORBIDDEN": "You don't have permission to access this resource."
-          "ERR_NOT_FOUND": "The requested resource was not found."
-          "ERR_UNPROCESSABLE": "The request was well-formed but was unable to be followed due to semantic errors."
-  client:
-    timeout: 30
-    max_retries: 3
-    retry_wait_min: 100
-    retry_wait_max: 1000
-    backoff_strategy: "exponential"
-    disable_keep_alives: false
-    max_idle_connections: 100
-    idle_conn_timeout: 90
-  websocket:
-    enabled: false
-    check_origin: true
-    allowed_origins:
-      - "https://example.com"
-      - "http://localhost:3000"
-    subprotocols:
-      - "chat"
-      - "echo"
-    read_buffer_size: 4096
-    write_buffer_size: 4096
-    ping_interval: 60
-    pong_timeout: 10
-    max_message_size: 524288
-    compression: false
-  static:
-    enabled: true
-    mappings:
-      - path: "/assets"
-        root: "./public"
-        index_file: "index.html"
-        cache_control: "public, max-age=3600"
-        browse: false
-      - path: "/uploads"
-        root: "./storage/uploads"
-        cache_control: "private, max-age=0"
-        browse: false
+Методы: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `Handle(method, pattern, handler)`.
+
+Параметры пути — нативный синтаксис Go 1.22: `/users/{id}`, `/files/{path...}`.
+
+### Request / Response
+
+**Запрос:**
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    // Параметр пути: /users/{id}
+    id := httpserver.PathParam(r, "id")
+
+    // Query-параметр: /search?q=hello
+    query := httpserver.QueryParam(r, "q")
+
+    // JSON body → struct (лимит 1 MB по умолчанию)
+    var input CreateOrderInput
+    if err := httpserver.Bind(r, &input); err != nil {
+        httpserver.Error(w, err)
+        return
+    }
+
+    // Кастомный лимит
+    if err := httpserver.BindWithLimit(r, &input, 10<<20); err != nil { // 10 MB
+        httpserver.Error(w, err)
+        return
+    }
+}
 ```
 
----
+**Ответ:**
 
-### 5. **Events — Событийная шина**
-
-Публикация и подписка на события с поддержкой `context`.
-
-#### 💡 Пример:
 ```go
-bus.Publish(ctx, UserCreatedEvent{ID: "123"})
-bus.Subscribe(ctx, func(ctx context.Context, e UserCreatedEvent) error {
-    log.Info("User created", "id", e.ID)
+// 200 OK с JSON
+httpserver.OK(w, map[string]any{"users": users})
+
+// 201 Created с JSON
+httpserver.Created(w, map[string]string{"id": newID})
+
+// 204 No Content
+httpserver.NoContent(w)
+
+// Произвольный статус
+httpserver.JSON(w, http.StatusAccepted, data)
+
+// Ошибка → автоматический HTTP-статус из errors.Kind
+httpserver.Error(w, domainErr)
+```
+
+**Wrap — handler, возвращающий error:**
+
+```go
+router.GET("/users/{id}", httpserver.Wrap(func(w http.ResponseWriter, r *http.Request) error {
+    id := httpserver.PathParam(r, "id")
+
+    user, err := userService.Find(r.Context(), id)
+    if err != nil {
+        return err // Error() вызовется автоматически
+    }
+
+    httpserver.OK(w, user)
     return nil
+}))
+```
+
+### Middleware
+
+Все middleware принимают `func(msg string, args ...any)` вместо конкретного логгера — нет импортных зависимостей.
+
+**Recovery** — перехват паник:
+
+```go
+middleware.Recovery(log.Error)
+```
+
+Паника → 500 JSON `{"code":"internal","message":"internal error"}`, стектрейс в лог.
+
+**RequestID** — генерация/проброс X-Request-Id:
+
+```go
+middleware.RequestID()
+
+// Извлечение из контекста
+id := middleware.IDFromContext(r.Context())
+```
+
+Если заголовок `X-Request-Id` присутствует — используется. Иначе — генерируется.
+
+**Logging** — логирование запросов:
+
+```go
+middleware.Logging(log.Info)
+```
+
+Логирует: method, path, status, duration, request_id.
+
+**CORS** — Cross-Origin Resource Sharing:
+
+```go
+middleware.CORS(middleware.CORSConfig{
+    AllowedOrigins: []string{"https://example.com", "https://app.example.com"},
+    AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
+    AllowedHeaders: []string{"Content-Type", "Authorization"},
+    MaxAge:         86400,
+})
+
+// Wildcard
+middleware.CORS(middleware.CORSConfig{
+    AllowedOrigins: []string{"*"},
 })
 ```
 
+Обрабатывает preflight (`OPTIONS`) запросы автоматически.
 
-#### ⚙️ Конфигурация:
-```yaml
-events:
-  async_mode: true
-  worker_count: 5
-```
+### Domain Errors → HTTP
 
----
+`httpserver.Error(w, err)` использует `shuldan/errors` для маппинга:
 
-### 6. **Queue — Очереди задач**
+| `errors.Kind` | HTTP Status | Пример |
+|:---:|:---:|---|
+| `Validation` | 400 | Невалидный ввод |
+| `Authentication` | 401 | Не авторизован |
+| `Authorization` | 403 | Нет доступа |
+| `NotFound` | 404 | Ресурс не найден |
+| `Conflict` | 409 | Конфликт версий |
+| `DomainRule` | 422 | Бизнес-правило нарушено |
+| `Infrastructure` | 503 | Сервис недоступен |
+| `Internal` | 500 | Внутренняя ошибка |
 
-Фоновая обработка задач с поддержкой:
-- Redis-брокера
-- Retry, DLQ
-- Автоматической регистрации обработчиков
-
-#### 💡 Пример:
 ```go
-type SendEmailJob struct {
-    To      string `json:"to"`
-    Subject string `json:"subject"`
+// Domain layer
+var ErrOrderNotFound = errors.NewCode("ORDER_NOT_FOUND").
+    Kind(errors.NotFound).
+    New("order {{.ID}} not found")
+
+// Presentation layer
+func getOrder(w http.ResponseWriter, r *http.Request) error {
+    order, err := service.Find(ctx, id)
+    if err != nil {
+        return err // → 404 {"code":"ORDER_NOT_FOUND","message":"order 123 not found"}
+    }
+    httpserver.OK(w, order)
+    return nil
 }
-queue.Produce(ctx, "emails", &SendEmailJob{To: "user@example.com", Subject: "Hello"})
 ```
+
+### HTTP Server Module
+
+`app.BackgroundModule` — listener создаётся в `Init`, порт слушается в `Start`.
+
+```go
+server := httpserver.NewModule(router, httpserver.Config{
+    Host:         "0.0.0.0",
+    Port:         8080,
+    ReadTimeout:  15 * time.Second,
+    WriteTimeout: 15 * time.Second,
+    IdleTimeout:  60 * time.Second,
+})
+
+// После Init — доступен реальный адрес
+server.Init(ctx)
+fmt.Println(server.Addr()) // "0.0.0.0:8080"
+```
+
+При `Port: 0` — выбирается свободный порт (удобно в тестах).
 
 ---
 
-### 7. **Database — Репозиторий и ORM**
+## Database Manager
 
-Работа с базой данных через интерфейс репозитория.
+Множество именованных подключений с отдельными пулами. Реализует `app.Module` и `app.HealthChecker`.
 
-#### 📌 Поддержка:
-- CRUD операций
-- Поиска, пагинации, счётчика
-- Transactional репозитория
-- UUID, IntID, StringID
-
-#### 💡 Пример:
 ```go
-user := TestUser{ID: NewUUID(), Name: "Alice"}
-repo.Save(ctx, user)
-found, err := repo.Find(ctx, user.ID)
+configs := map[string]database.ConnectionConfig{
+    "default": {
+        Driver:          "postgres",
+        DSN:             cfg.GetString("database.connections.default.dsn"),
+        MaxOpenConns:    25,
+        MaxIdleConns:    5,
+        ConnMaxLifetime: 5 * time.Minute,
+    },
+    "analytics": {
+        Driver:       "postgres",
+        DSN:          cfg.GetString("database.connections.analytics.dsn"),
+        MaxOpenConns: 10,
+    },
+}
+
+dbm, err := database.NewManager(configs, log)
 ```
 
-#### ⚙️ Конфигурация:
+### Работа с подключениями
+
+```go
+// По имени
+db := dbm.Connection("default")
+analyticsDB := dbm.Connection("analytics")
+
+// Shortcut для "default"
+db := dbm.Default()
+
+// Драйвер
+driver := dbm.Driver("default") // "postgres"
+
+// Проверка существования
+if dbm.Has("analytics") { ... }
+
+// Все имена (детерминированный порядок)
+names := dbm.Names() // ["analytics", "default"]
+```
+
+### Lifecycle
+
+```go
+// app.Module
+dbm.Init(ctx)    // no-op (подключения открыты в конструкторе)
+dbm.Start(ctx)   // Ping всех подключений
+dbm.Stop(ctx)    // Close в обратном порядке
+
+// app.HealthChecker
+dbm.Health(ctx)   // Ping всех, возвращает errors.Join
+```
+
+### Конфигурация
+
 ```yaml
 database:
-  default: "primary"
   connections:
-    primary:
-      driver: "sqlite3"
-      dsn: ":memory:"
-      options:
-        max_open_conns: 10
-        max_idle_conns: 5
-        conn_max_lifetime: 3600
-        conn_max_idle_time: 1800
-        ping_timeout: 15
-        retry_attempts: 3
-        retry_delay: 200
-  migrations:
-    enabled: true
-    table: "schema_migrations"
-    path: "./migrations"
-  auto_migrate: true
+    default:
+      driver: postgres
+      dsn: "{{ env \"DATABASE_URL\" }}"
+      max_open_conns: 25
+      max_idle_conns: 5
+      conn_max_lifetime: 5m
+    analytics:
+      driver: postgres
+      dsn: "{{ env \"ANALYTICS_DB_URL\" }}"
+      max_open_conns: 10
 ```
 
 ---
 
-### 8. **Errors — Расширенная система ошибок**
+## EventBus
 
-Гибкая система ошибок с:
-- Уникальными кодами (например, `APP_0001`)
-- Деталями, стек-трейсом, причинами
-- Поддержкой `errors.Is`, `errors.As`
-- Конкурентной безопасностью
+Обёртка над `events.Dispatcher` как `app.Module`.
 
-#### 💡 Пример:
 ```go
-var ErrValidation = errors.WithPrefix("AUTH").New("invalid credentials")
-return ErrValidation.WithDetail("field", "email").WithCause(originalErr)
+bus := eventbus.NewModule(eventbus.Config{
+    Async:      true,
+    Workers:    8,
+    BufferSize: 256,
+    Ordered:    false,
+})
+
+// Получение диспетчера для DDD-модулей
+dispatcher := bus.Dispatcher()
 ```
 
----
+DDD-модуль подписывается на события:
 
-### 9. **CLI — Командная строка**
-
-Регистрация и выполнение CLI-команд.
-
-#### 💡 Пример:
 ```go
-cmd := &testCommand{
-    name:        "greet",
-    description: "Say hello",
+func (m *OrderModule) Listeners(d *events.Dispatcher) {
+    events.SubscribeFunc(d, func(ctx context.Context, e *PaymentReceived) error {
+        return m.interactor.ConfirmOrder(ctx, e.OrderID)
+    })
 }
-cli.Register(cmd)
-cli.Run(appCtx)
+```
+
+### Конфигурация
+
+```yaml
+events:
+  async: true
+  workers: 8
+  buffer_size: 256
+  ordered: false    # true — события одного агрегата последовательно
 ```
 
 ---
 
-### 10. **Config — Конфигурация**
+## Event → Queue Relay
 
-Поддержка нескольких источников:
-- Файлы: JSON, YAML
-- Environment variables
-- Флаги командной строки
+Выборочная пересылка доменных событий в очередь.
+
+```go
+relay := eventbus.NewRelay(bus.Dispatcher(), broker, log)
+
+// DDD-модуль регистрирует пересылку
+func (m *OrderModule) Relays(relay *eventbus.Relay) {
+    // Все OrderCreated → в очередь
+    relay.Forward("OrderCreated", "order.created")
+
+    // OrderCancelled → только если сумма > 1000
+    relay.Forward("OrderCancelled", "order.cancelled",
+        eventbus.WithFilter(func(e events.Event) bool {
+            oc, ok := e.(*OrderCancelled)
+            return ok && oc.Amount > 1000
+        }),
+    )
+
+    // Кастомная сериализация
+    relay.Forward("OrderShipped", "order.shipped",
+        eventbus.WithTransform(func(e events.Event) ([]byte, error) {
+            return json.Marshal(map[string]string{
+                "order_id": e.AggregateID(),
+                "event":    e.EventName(),
+            })
+        }),
+    )
+}
+```
+
+| Опция | Описание |
+|-------|----------|
+| `WithFilter(fn)` | Дополнительная фильтрация по содержимому события |
+| `WithTransform(fn)` | Кастомная сериализация (default: `json.Marshal`) |
+
+**Как работает:** Relay подписывается на `Dispatcher` через `SubscribeAll`. При получении события проверяет, зарегистрировано ли имя, применяет фильтр, сериализует и вызывает `broker.Produce(topic, data)`.
 
 ---
 
-## 🛠️ Инструменты
+## Queue Worker
 
-```bash
-make deps       # Установка зависимостей
-make fmt        # Форматирование кода
-make lint       # Запуск линтеров
-make vet        # Проверка go vet
-make test       # Запуск тестов с race detector
-make test-coverage  # С отчётом покрытия
-make bench      # Бенчмарки
-make ci         # Полная проверка (для CI)
-make clean      # Очистка
+Управляет lifecycle consumer-ов очередей. Реализует `app.BackgroundModule`.
+
+```go
+qw := queueworker.NewModule(log)
+
+// DDD-модуль регистрирует consumers
+func (m *PaymentModule) Consumers(qw *queueworker.Module) {
+    q, _ := queue.New[*ProcessPayment](broker,
+        queue.WithTopic("payment.process"),
+        queue.WithMaxRetries(3),
+    )
+
+    qw.Register(queueworker.Registration{
+        Name: "payment-processor",
+        Run: func(ctx context.Context) error {
+            return q.Consume(ctx, m.interactor.ProcessPayment)
+        },
+    })
+}
+```
+
+### Поведение
+
+- `Start()` — запускает goroutine для каждого consumer
+- `Stop()` — отменяет context, ждёт завершения всех goroutine
+- `Err()` — первая fatal-ошибка consumer-а триггерит shutdown приложения
+- `context.Canceled` / `DeadlineExceeded` — не считаются ошибками (нормальный shutdown)
+
+---
+
+## Migration Runner
+
+Оркестрация миграций по нескольким БД-подключениям.
+
+```go
+runner := migration.NewRunner(dbm, log,
+    migration.WithMigrationTable("schema_migrations"),
+    migration.WithAdvisoryLock(),
+)
+
+// DDD-модуль регистрирует миграции
+func (m *OrderModule) Migrations(runner *migration.Runner) {
+    runner.Register("default",
+        migrator.CreateMigration("20240101_001", "Create orders table").
+            CreateTable("orders",
+                "id UUID PRIMARY KEY",
+                "customer_id UUID NOT NULL",
+                "status VARCHAR(50) NOT NULL DEFAULT 'draft'",
+                "version INTEGER NOT NULL DEFAULT 1",
+                "created_at TIMESTAMP NOT NULL DEFAULT NOW()",
+            ).MustBuild(),
+
+        migrator.CreateMigration("20240101_002", "Create order items table").
+            CreateTable("order_items",
+                "id UUID PRIMARY KEY",
+                "order_id UUID NOT NULL REFERENCES orders(id)",
+                "product_id UUID NOT NULL",
+                "quantity INTEGER NOT NULL",
+            ).MustBuild(),
+    )
+}
+```
+
+### Диалект определяется автоматически из имени драйвера
+
+| Driver | Dialect |
+|--------|---------|
+| `postgres`, `pgx` | PostgreSQL |
+| `mysql` | MySQL |
+| `sqlite`, `sqlite3` | SQLite |
+
+---
+
+## CLI-команды
+
+### Lifecycle-команды (долгоживущие)
+
+Создают `app.Application`, регистрируют модули, вызывают `app.Run()`.
+
+```go
+// Полный сервер: HTTP + Events + Queue
+command.Serve("myapp", log, 15*time.Second,
+    dbm, bus, server, qw,
+)
+
+// Только воркеры очередей (без HTTP)
+command.QueueWork("myapp", log, 15*time.Second,
+    dbm, bus, qw,
+)
+```
+
+### Run-and-exit команды
+
+Выполняют действие и завершаются. Без `app.Run()`.
+
+```go
+command.MigrateUp(runner)       // migrate:up [--connection=default]
+command.MigrateDown(runner)     // migrate:down [--steps=1] [--force] [--connection=default]
+command.MigrateStatus(runner)   // migrate:status [--connection=default]
+command.MigratePlan(runner)     // migrate:plan [--connection=default]
+command.Health(dbm, broker)     // health
+command.ConfigDump(cfg)         // config:dump [--no-mask]
+```
+
+### Таблица всех команд
+
+| Команда | Группа | Описание | Тип |
+|---------|--------|----------|-----|
+| `serve` | server | HTTP-сервер + фоновые воркеры | lifecycle |
+| `queue:work` | queue | Только consumer-ы очередей | lifecycle |
+| `migrate:up` | database | Применить pending миграции | run-and-exit |
+| `migrate:down` | database | Откатить N миграций | run-and-exit |
+| `migrate:status` | database | Таблица статусов миграций | run-and-exit |
+| `migrate:plan` | database | Показать SQL без выполнения | run-and-exit |
+| `health` | debug | Проверка здоровья сервисов | run-and-exit |
+| `config:dump` | debug | Вывод конфига (секреты маскируются) | run-and-exit |
+
+### Маскировка секретов
+
+`config:dump` автоматически маскирует значения ключей, содержащих: `password`, `secret`, `token`, `key`, `dsn`, `credential`.
+
+```sh
+myapp config:dump
+# database:
+#   dsn: ***
+# api:
+#   token: ***
+
+myapp config:dump --no-mask
+# database:
+#   dsn: postgres://user:pass@localhost/db
 ```
 
 ---
 
-## 📊 CI/CD
+## 🏛️ Сценарии использования
 
-- GitHub Actions: запуск тестов, линтеров, security-сканирования (`gosec`)
-- Codecov: отчёт о покрытии
-- SARIF: интеграция с GitHub Security
+### Полноценный backend с lazy-инициализацией
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "time"
+
+    "github.com/shuldan/cli"
+
+    "github.com/shuldan/framework"
+    "github.com/shuldan/framework/command"
+    "github.com/shuldan/framework/database"
+    "github.com/shuldan/framework/eventbus"
+    "github.com/shuldan/framework/httpserver"
+    "github.com/shuldan/framework/httpserver/middleware"
+    "github.com/shuldan/framework/migration"
+    "github.com/shuldan/framework/queueworker"
+
+    memorymq "github.com/shuldan/queue/broker/memory"
+
+    "myapp/internal/module/order"
+    "myapp/internal/module/user"
+    "myapp/internal/module/payment"
+)
+
+func main() {
+    // ─── Foundation ──────────────────────────
+    k, err := framework.NewKernel(
+        framework.WithConfigFile("config.yaml"),
+        framework.WithEnvPrefix("APP_"),
+        framework.WithProfileEnv("APP_ENV"),
+    )
+    if err != nil {
+        fatal(err)
+    }
+    cfg := k.Config()
+    log := k.Logger()
+
+    // ─── Lazy Infrastructure ─────────────────
+    dbm := framework.NewLazy(func() (*database.Manager, error) {
+        return database.NewManager(map[string]database.ConnectionConfig{
+            "default": {
+                Driver:       "postgres",
+                DSN:          cfg.GetString("database.connections.default.dsn"),
+                MaxOpenConns: cfg.GetInt("database.connections.default.max_open_conns", 25),
+            },
+        }, log)
+    })
+
+    bus := framework.NewLazy(func() (*eventbus.Module, error) {
+        return eventbus.NewModule(eventbus.Config{
+            Async:      cfg.GetBool("events.async", true),
+            Workers:    cfg.GetInt("events.workers", 8),
+            BufferSize: cfg.GetInt("events.buffer_size", 256),
+        }), nil
+    })
+
+    broker := framework.NewLazy(func() (*memorymq.Broker, error) {
+        return memorymq.New(), nil  // или redisBroker.New(...)
+    })
+
+    // ─── Lazy DDD Modules ────────────────────
+    orderMod := framework.NewLazy(func() (*order.Module, error) {
+        db := dbm.MustGet()
+        ev := bus.MustGet()
+        return order.NewModule(db.Default(), ev.Dispatcher(), cfg), nil
+    })
+
+    userMod := framework.NewLazy(func() (*user.Module, error) {
+        db := dbm.MustGet()
+        return user.NewModule(db.Default(), cfg), nil
+    })
+
+    paymentMod := framework.NewLazy(func() (*payment.Module, error) {
+        db := dbm.MustGet()
+        br := broker.MustGet()
+        return payment.NewModule(db.Default(), br, cfg), nil
+    })
+
+    // ─── Serve Command ──────────────────────
+    buildServe := func() cli.Command {
+        return command.Serve("myapp", log, 15*time.Second, func() []app.Module {
+            // Эти Get() триггерят создание
+            db := dbm.MustGet()
+            ev := bus.MustGet()
+            om := orderMod.MustGet()
+            um := userMod.MustGet()
+            pm := paymentMod.MustGet()
+            br := broker.MustGet()
+
+            // Router
+            router := httpserver.NewRouter()
+            router.Use(
+                middleware.Recovery(log.Error),
+                middleware.RequestID(),
+                middleware.Logging(log.Info),
+            )
+            om.Routes(router)
+            um.Routes(router)
+            pm.Routes(router)
+            server := httpserver.NewModule(router, httpserver.Config{
+                Port: cfg.GetInt("server.port", 8080),
+            })
+
+            // Events
+            om.Listeners(ev.Dispatcher())
+            pm.Listeners(ev.Dispatcher())
+
+            // Relay
+            relay := eventbus.NewRelay(ev.Dispatcher(), br, log)
+            om.Relays(relay)
+
+            // Queue
+            qw := queueworker.NewModule(log)
+            pm.Consumers(qw)
+
+            return []app.Module{db, ev, server, qw}
+        }())
+    }
+
+    // ─── Migration Runner ───────────────────
+    buildRunner := func() *migration.Runner {
+        db := dbm.MustGet()
+        runner := migration.NewRunner(db, log, migration.WithAdvisoryLock())
+        orderMod.MustGet().Migrations(runner)
+        userMod.MustGet().Migrations(runner)
+        paymentMod.MustGet().Migrations(runner)
+        return runner
+    }
+
+    // ─── CLI Commands ───────────────────────
+    k.Command(
+        buildServe(),
+        command.MigrateUp(buildRunner()),
+        command.MigrateDown(buildRunner()),
+        command.MigrateStatus(buildRunner()),
+        command.MigratePlan(buildRunner()),
+        command.Health(dbm.MustGet()),
+        command.ConfigDump(cfg),
+    )
+
+    // ─── Shutdown ───────────────────────────
+    k.OnShutdown(func() {
+        broker.IfCreated(func(b *memorymq.Broker) { _ = b.Close() })
+        dbm.IfCreated(func(m *database.Manager) { _ = m.Stop(context.Background()) })
+    })
+
+    // ─── Run ────────────────────────────────
+    if err := k.Run(context.Background(), os.Args[1:]); err != nil {
+        fatal(err)
+    }
+}
+
+func fatal(err error) {
+    fmt.Fprintln(os.Stderr, err)
+    os.Exit(1)
+}
+```
+
+> **Примечание:** в реальном проекте `main.go` делегирует сборку в `internal/bootstrap/`, оставляя себе ~10 строк.
+
+### API Gateway (только HTTP, без БД)
+
+```go
+func main() {
+    k, _ := framework.NewKernel(
+        framework.WithConfigFile("gateway.yaml"),
+    )
+
+    router := httpserver.NewRouter()
+    router.Use(
+        middleware.Recovery(k.Logger().Error),
+        middleware.CORS(middleware.CORSConfig{AllowedOrigins: []string{"*"}}),
+    )
+
+    // Proxy routes, rate limiting — без БД, событий, очередей
+    gateway.RegisterRoutes(router, k.Config())
+
+    server := httpserver.NewModule(router, httpserver.Config{Port: 443})
+
+    k.Command(command.Serve("gateway", k.Logger(), 10*time.Second, server))
+    k.Run(context.Background(), os.Args[1:])
+}
+```
+
+### Worker (только очереди, без HTTP)
+
+```go
+func main() {
+    k, _ := framework.NewKernel(framework.WithConfigFile("config.yaml"))
+
+    dbm, _ := database.NewManager(configs, k.Logger())
+    broker := redisBroker.New(redisClient)
+
+    qw := queueworker.NewModule(k.Logger())
+    paymentMod := payment.NewModule(dbm.Default(), broker, k.Config())
+    paymentMod.Consumers(qw)
+
+    k.Command(command.QueueWork("worker", k.Logger(), 15*time.Second, dbm, qw))
+    k.Run(context.Background(), os.Args[1:])
+}
+```
 
 ---
 
-## 🎯 Roadmap
+## Структура DDD-модуля
 
-- [ ] Поддержка GraphQL
-- [ ] gRPC интеграция
-- [ ] Distributed tracing (OpenTelemetry)
-- [ ] Prometheus metrics
-- [ ] Health checks
-- [ ] Admin UI
+```
+internal/module/order/
+├── application/
+│   ├── business/
+│   │   ├── emitter/       ← публикация доменных событий
+│   │   ├── operation/     ← use-case операции
+│   │   └── policy/        ← application-level политики
+│   ├── interactor/        ← оркестрация use-cases
+│   └── port/              ← интерфейсы внешних зависимостей
+├── domain/
+│   ├── business/
+│   │   ├── emitter/       ← интерфейсы публикаторов событий
+│   │   ├── operation/     ← интерфейсы use-case операций
+│   │   └── policy/        ← интерфейсы политик
+│   ├── model/             ← агрегаты, value objects, entities
+│   └── persistence/       ← интерфейсы репозиториев
+├── infrastructure/
+│   ├── adapter/           ← реализация портов
+│   ├── migration/         ← миграции модуля
+│   └── persistence/       ← реализация репозиториев
+├── presentation/
+│   ├── api/               ← HTTP обработчики
+│   ├── command/           ← CLI команды модуля
+│   ├── listener/          ← обработчики событий
+│   └── job/               ← обработчики очередей
+└── module.go              ← регистрация модуля
+```
+
+### Пример модуля
+
+```go
+// internal/module/order/module.go
+package order
+
+type Module struct {
+    interactor *interactor.OrderInteractor
+    repo       *persistence.OrderRepository
+}
+
+func NewModule(db *sql.DB, dispatcher *events.Dispatcher, cfg config.ConfigProvider) *Module {
+    repo := persistence.NewOrderRepository(db, repository.Postgres())
+    publisher := adapter.NewEventPublisher(dispatcher)
+    inter := interactor.New(repo, publisher, cfg)
+    return &Module{interactor: inter, repo: repo}
+}
+
+func (m *Module) Routes(router *httpserver.Router) {
+    api := router.Group("/api/v1/orders")
+    api.GET("", httpserver.Wrap(m.listOrders))
+    api.GET("/{id}", httpserver.Wrap(m.getOrder))
+    api.POST("", httpserver.Wrap(m.createOrder))
+}
+
+func (m *Module) Listeners(d *events.Dispatcher) {
+    events.SubscribeFunc(d, m.onPaymentReceived)
+}
+
+func (m *Module) Relays(relay *eventbus.Relay) {
+    relay.Forward("OrderCreated", "order.created")
+}
+
+func (m *Module) Migrations(runner *migration.Runner) {
+    runner.Register("default", m.migrations()...)
+}
+```
 
 ---
 
-## 🤝 Участие в разработке
+## Структура пакетов
 
-1. Fork репозитория
-2. Создайте feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit изменений (`git commit -m 'Add amazing feature'`)
-4. Push в ветку (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
+```
+shuldan/framework/
+├── lazy.go                    — Lazy[T] (ленивая инициализация)
+├── kernel.go                  — Kernel (cfg + log + CLI)
+├── kernel_option.go           — WithConfigFile, WithEnvPrefix, ...
+├── kernel_build.go            — buildConfig, buildLogger, buildConsole
+│
+├── logger/
+│   └── logger.go              — slog-обёртка, Config, New, With
+│
+├── database/
+│   ├── config.go              — ConnectionConfig
+│   ├── errors.go              — ErrNoConnections, ErrConnectionNotFound
+│   ├── logger.go              — Logger interface
+│   └── manager.go             — Manager: app.Module + HealthChecker
+│
+├── httpserver/
+│   ├── config.go              — Config (host, port, timeouts)
+│   ├── errors.go              — ErrEmptyBody, ErrBodyTooLarge, ErrInvalidJSON
+│   ├── middleware.go           — Middleware type, applyChain
+│   ├── router.go              — Router: обёртка ServeMux
+│   ├── server.go              — Module: app.BackgroundModule
+│   ├── request.go             — Bind, PathParam, QueryParam
+│   ├── response.go            — JSON, OK, Created, Error, Wrap
+│   └── middleware/
+│       ├── recovery.go        — перехват паник
+│       ├── requestid.go       — X-Request-Id + context
+│       ├── logging.go         — лог запросов
+│       └── cors.go            — CORS
+│
+├── eventbus/
+│   ├── config.go              — Config → events.Option
+│   ├── module.go              — Module: app.Module
+│   └── relay.go               — Relay: Event → Queue
+│
+├── queueworker/
+│   └── module.go              — Module: app.BackgroundModule
+│
+├── migration/
+│   ├── runner.go              — Runner: миграции по подключениям
+│   └── option.go              — WithMigrationTable, WithAdvisoryLock
+│
+└── command/
+    ├── serve.go               — serve (lifecycle)
+    ├── queue_work.go          — queue:work (lifecycle)
+    ├── migrate_up.go          — migrate:up
+    ├── migrate_down.go        — migrate:down
+    ├── migrate_status.go      — migrate:status
+    ├── migrate_plan.go        — migrate:plan
+    ├── health.go              — health
+    └── config_dump.go         — config:dump
+```
 
-### Требования к коду
-- Покрытие тестами >80%
-- Проходит все линтеры
-- Соответствует Go conventions
-- Документирован публичный API
+---
+
+## Базовая конфигурация
+
+```yaml
+# config.yaml
+app:
+  name: myapp
+  version: 1.0.0
+  environment: development
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+
+database:
+  connections:
+    default:
+      driver: postgres
+      dsn: "{{ env \"DATABASE_URL\" | default \"postgres://localhost:5432/myapp?sslmode=disable\" }}"
+      max_open_conns: 25
+      max_idle_conns: 5
+      conn_max_lifetime: 5m
+
+events:
+  async: true
+  workers: 8
+  buffer_size: 256
+  ordered: false
+
+queue:
+  broker: memory
+  workers: 4
+  max_retries: 3
+  dlq: true
+
+log:
+  level: info
+  format: json
+  output: stdout
+```
+
+```yaml
+# config.production.yaml
+server:
+  port: 443
+
+database:
+  connections:
+    default:
+      max_open_conns: 100
+
+log:
+  level: warn
+```
+
+```sh
+APP_ENV=production myapp serve
+# Loads: config.yaml → config.production.yaml → ENV
+```
+
+---
+
+## 🛠️ Разработка
+
+### Установка инструментов
+
+```sh
+make install-tools
+```
+
+Устанавливает:
+- `golangci-lint` (v2.4.0)
+- `goimports`
+- `gosec`
+
+### Команды
+
+| Команда | Описание |
+|---------|----------|
+| `make all` | Форматирование, линтер, security, тесты |
+| `make ci` | CI-пайплайн |
+| `make fmt` | Форматирование кода |
+| `make test` | Запуск тестов |
+| `make test-coverage` | Тесты с отчётом о покрытии |
+
+### Требования к PR
+
+- Покрытие тестами нового функционала (≥ 70%)
+- Соответствие `golangci-lint`
+- Функции ≤ 60 строк, ≤ 40 выражений
+- Нет circular imports между пакетами
+- Middleware принимают функции, не конкретные типы
 
 ---
 
 ## 📄 Лицензия
 
-MIT License — подробности в файле [LICENSE](LICENSE).
+Проект распространяется под лицензией [MIT](LICENSE).
+
+---
+
+## 🤝 Вклад в проект
+
+PR и issue приветствуются! Обязательно соблюдайте стиль кода и покрывайте новый функционал тестами.
+
+---
+
+> **Автор**: MSeytumerov
+> **Репозиторий**: `github.com/shuldan/framework`
+> **Go**: `1.24.2`

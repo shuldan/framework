@@ -7,19 +7,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
+  lint-and-test:
+    name: Lint, Format & Test
     runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,46 +20,51 @@ jobs:
           go-version: '1.24'
           cache: true
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Install tools
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Verify dependencies
-        run: go mod verify
-
-      - name: Check formatting
         run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            echo "The following files are not formatted:"
-            gofmt -s -l .
+          go mod tidy
+          go mod verify
+
+      - name: Check code formatting (gofmt + goimports)
+        run: |
+          unformatted=$(gofmt -s -l .)
+          if [ -n "$unformatted" ]; then
+            echo "❌ Unformatted files (gofmt):"
+            echo "$unformatted"
             exit 1
           fi
-
-      - name: Install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
+          unimported=$(goimports -local github.com/shuldan/framework -l .)
+          if [ -n "$unimported" ]; then
+            echo "❌ Unformatted imports (goimports):"
+            echo "$unimported"
+            exit 1
+          fi
 
       - name: Run linter
-        run: |
-          $(go env GOPATH)/bin/golangci-lint run --config .golangci-lint.yaml ./...
+        run: $(go env GOPATH)/bin/golangci-lint run --config .golangci-lint.yaml
 
-      - name: Run tests
-        run: go test -race -timeout 30s -coverprofile=coverage.out -covermode=atomic ./...
-        env:
-          REDIS_URL: redis://localhost:6379
+      - name: Run security scan (gosec)
+        run: gosec -exclude-dir=test ./...
 
-      - name: Check test coverage
+      - name: Run tests with coverage
+        run: go test -race -count=1 -timeout=30s -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Display coverage
         run: |
           go tool cover -func=coverage.out
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+' || echo "0.0")
-          echo "Coverage: $COVERAGE%"
-          # Временно снижаем требования до 70%
+          COVERAGE=$(go tool cover -func=coverage.out | awk '/total/ {print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          # Требуем минимум 70% покрытия
           if (( $(echo "$COVERAGE < 70.0" | bc -l) )); then
-            echo "Coverage $COVERAGE% is below minimum 70%"
+            echo "❌ Coverage ($COVERAGE%) is below 70%"
             exit 1
           fi
-
-      - name: Run benchmarks
-        run: go test -bench=. -benchmem ./... -run=^$ || true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -77,79 +72,3 @@ jobs:
           files: ./coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
         if: github.ref == 'refs/heads/main'
-
-  security:
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - name: Install gosec
-        run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run gosec security scan
-        run: |
-          gosec -fmt sarif -out gosec.sarif ./...
-        continue-on-error: true
-
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: gosec.sarif
-        if: always()
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [ test ]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - name: Build
-        run: go build -v ./...
-
-      - name: Test build examples
-        run: |
-          mkdir -p examples/basic
-          cd examples/basic
-          go mod init example
-          go mod edit -replace github.com/shuldan/framework=../..
-          cat > main.go << 'EOF'
-          package main
-          
-          import (
-              "log"
-              "github.com/shuldan/framework/pkg/bootstrap"
-          )
-          
-          func main() {
-            boot := bootstrap.New("test", "test", "TEST").
-              WithLogger().
-              WithCli()
-            
-            application, err := boot.CreateApp()
-            if err != nil {
-              log.Fatalf("Application initialization failed: %v", err)
-            }
-  
-            if err := application.Run(); err != nil {
-              log.Println(err)
-            }
-          }
-          EOF
-          go mod tidy
-          go build -o example .
