@@ -16,6 +16,7 @@ func TestJSON(t *testing.T) {
 	JSON(rr, http.StatusOK, map[string]string{"key": "val"})
 	assertStatus(t, http.StatusOK, rr)
 	assertHeader(t, "Content-Type", "application/json", rr)
+	assertHeader(t, "X-Content-Type-Options", "nosniff", rr)
 	var result map[string]string
 	_ = json.Unmarshal(rr.Body.Bytes(), &result)
 	if result["key"] != "val" {
@@ -28,6 +29,7 @@ func TestJSON_MarshalError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	JSON(rr, http.StatusOK, math.Inf(1))
 	assertStatus(t, http.StatusInternalServerError, rr)
+	assertHeader(t, "X-Content-Type-Options", "nosniff", rr)
 }
 
 func TestOK(t *testing.T) {
@@ -63,6 +65,7 @@ func TestError_DomainError(t *testing.T) {
 	Error(rr, err)
 	assertStatus(t, http.StatusNotFound, rr)
 	assertHeader(t, "Content-Type", "application/json", rr)
+	assertHeader(t, "X-Content-Type-Options", "nosniff", rr)
 	var body domainerrors.PublicError
 	_ = json.Unmarshal(rr.Body.Bytes(), &body)
 	if body.Code != "USER_NOT_FOUND" {

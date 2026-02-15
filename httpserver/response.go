@@ -10,11 +10,14 @@ import (
 func JSON(w http.ResponseWriter, status int, data any) {
 	buf, err := json.Marshal(data)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_, _ = w.Write(buf)
 }
