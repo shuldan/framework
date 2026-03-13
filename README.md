@@ -21,7 +21,8 @@
 - **Компоненты опциональны** — API Gateway без БД, Worker без HTTP
 - **HTTP-сервер** — обёртка Go 1.22+ `ServeMux` с middleware, группами, error-хелперами
 - **Множество БД** — именованные подключения с отдельными пулами и миграциями
-- **Event → Queue relay** — выборочная пересылка доменных событий в очередь
+- **Event ↔ Queue Bridge** — двусторонняя пересылка событий между сервисами через очередь
+- **Стандартный Envelope** — единый формат межсервисных сообщений с поддержкой трассировки
 - **Structured logging** — единый `slog`-логгер для всех компонентов
 - **Domain errors → HTTP** — автоматический маппинг `errors.Kind` в HTTP-статус и JSON
 
@@ -68,6 +69,19 @@ serve         → всё
 
 `Lazy[T]` гарантирует: каждый компонент создаётся **ровно один раз** (`sync.Once`), даже при запросе из нескольких модулей.
 
+### Structural typing для логгеров
+
+Каждый пакет определяет собственный минимальный интерфейс `Logger`:
+
+```go
+type Logger interface {
+Info(msg string, args ...any)
+Error(msg string, args ...any)
+}
+```
+
+`framework/logger.Logger` удовлетворяет всем этим интерфейсам автоматически — никаких импортных зависимостей между пакетами, никаких адаптеров. Nil-safe: при передаче `nil` используется `noopLogger`.
+
 ---
 
 ## 📖 Содержание
@@ -77,13 +91,17 @@ serve         → всё
 - [Lazy[T]](#lazyt)
 - [Logger](#logger)
 - [HTTP Server](#http-server)
-    - [Router](#router)
-    - [Request / Response](#request--response)
-    - [Middleware](#middleware)
-    - [Domain Errors → HTTP](#domain-errors--http)
+  - [Router](#router)
+  - [Request / Response](#request--response)
+  - [Middleware](#middleware)
+  - [Domain Errors → HTTP](#domain-errors--http)
 - [Database Manager](#database-manager)
 - [EventBus](#eventbus)
-- [Event → Queue Relay](#event--queue-relay)
+- [Event ↔ Queue Bridge](#event--queue-bridge)
+  - [Envelope](#envelope)
+  - [OutboundRelay](#outboundrelay-события--очередь)
+  - [InboundRelay](#inboundrelay-очередь--события)
+  - [Межсервисная коммуникация](#межсервисная-коммуникация)
 - [Queue Worker](#queue-worker)
 - [Migration Runner](#migration-runner)
 - [CLI-команды](#cli-команды)
@@ -490,7 +508,7 @@ fmt.Println(server.Addr()) // "0.0.0.0:8080"
 
 ## Database Manager
 
-Множество именованных подключений с отдельными пулами. Реализует `app.Module` и `app.HealthChecker`.
+Множество именованных подключений с отдельными пулами. Реализует `app.Module` и `HealthChecker`.
 
 ```go
 configs := map[string]database.ConnectionConfig{
@@ -539,9 +557,22 @@ dbm.Init(ctx)    // no-op (подключения открыты в констр
 dbm.Start(ctx)   // Ping всех подключений
 dbm.Stop(ctx)    // Close в обратном порядке
 
-// app.HealthChecker
+// HealthChecker
 dbm.Health(ctx)   // Ping всех, возвращает errors.Join
 ```
+
+### HealthChecker interface
+
+Любой компонент может участвовать в проверке здоровья, реализовав:
+
+```go
+type HealthChecker interface {
+    Name() string
+    Health(ctx context.Context) error
+}
+```
+
+`database.Manager` реализует этот интерфейс автоматически. Собственные компоненты (Redis, внешние API) подключаются так же.
 
 ### Конфигурация
 
@@ -600,28 +631,90 @@ events:
 
 ---
 
-## Event → Queue Relay
+## Event ↔ Queue Bridge
+
+Двусторонний мост между внутренними доменными событиями и межсервисной очередью. Состоит из трёх компонентов:
+
+```
+Service A                              Queue                          Service B
+┌─────────────┐                                                  ┌─────────────┐
+│ Dispatcher  │──→ OutboundRelay ──→ [topic] ──→ InboundRelay ──→│ Dispatcher  │
+│             │←── InboundRelay  ←── [topic] ←── OutboundRelay ←──│             │
+└─────────────┘                                                  └─────────────┘
+                          ↕ Envelope format ↕
+```
+
+### Envelope
+
+Стандартный формат межсервисного сообщения. Все события, проходящие через `OutboundRelay`, оборачиваются в Envelope.
+
+```go
+type Envelope struct {
+    EventName   string          `json:"event_name"`
+    AggregateID string          `json:"aggregate_id"`
+    OccurredAt  time.Time       `json:"occurred_at"`
+    Source      string          `json:"source,omitempty"`
+    Payload     json.RawMessage `json:"payload"`
+
+    // Зарезервированы для трассировки
+    CorrelationID string `json:"correlation_id,omitempty"`
+    CausationID   string `json:"causation_id,omitempty"`
+    SchemaVersion string `json:"schema_version,omitempty"`
+}
+```
+
+Пример JSON в очереди:
+
+```json
+{
+  "event_name": "OrderCreated",
+  "aggregate_id": "order-123",
+  "occurred_at": "2025-01-15T10:30:00Z",
+  "source": "order-service",
+  "payload": {
+    "order_id": "order-123",
+    "customer_id": "cust-456",
+    "total": 1500
+  }
+}
+```
+
+| Поле | Описание |
+|------|----------|
+| `event_name` | Имя доменного события |
+| `aggregate_id` | ID агрегата-источника |
+| `occurred_at` | Время возникновения события |
+| `source` | Имя сервиса-отправителя (для фильтрации собственных событий) |
+| `payload` | Сериализованное доменное событие |
+| `correlation_id` | ID цепочки запросов (для трассировки) |
+| `causation_id` | ID события-причины |
+| `schema_version` | Версия схемы payload |
+
+### OutboundRelay (события → очередь)
 
 Выборочная пересылка доменных событий в очередь.
 
 ```go
-relay := eventbus.NewRelay(bus.Dispatcher(), broker, log)
+outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
+    eventbus.WithSource("order-service"),  // записывается в envelope.source
+)
+defer outbound.Unsubscribe()  // отписка от диспетчера
 
 // DDD-модуль регистрирует пересылку
-func (m *OrderModule) Relays(relay *eventbus.Relay) {
-    // Все OrderCreated → в очередь
-    relay.Forward("OrderCreated", "order.created")
+func (m *OrderModule) Relays(outbound *eventbus.OutboundRelay) {
+    // Все OrderCreated → в очередь (оборачиваются в Envelope)
+    outbound.Forward("OrderCreated", "order.created")
 
     // OrderCancelled → только если сумма > 1000
-    relay.Forward("OrderCancelled", "order.cancelled",
+    outbound.Forward("OrderCancelled", "order.cancelled",
         eventbus.WithFilter(func(e events.Event) bool {
             oc, ok := e.(*OrderCancelled)
             return ok && oc.Amount > 1000
         }),
     )
 
-    // Кастомная сериализация
-    relay.Forward("OrderShipped", "order.shipped",
+    // Кастомная сериализация (Envelope НЕ используется)
+    outbound.Forward("OrderShipped", "order.shipped",
         eventbus.WithTransform(func(e events.Event) ([]byte, error) {
             return json.Marshal(map[string]string{
                 "order_id": e.AggregateID(),
@@ -632,12 +725,135 @@ func (m *OrderModule) Relays(relay *eventbus.Relay) {
 }
 ```
 
-| Опция | Описание |
-|-------|----------|
-| `WithFilter(fn)` | Дополнительная фильтрация по содержимому события |
-| `WithTransform(fn)` | Кастомная сериализация (default: `json.Marshal`) |
+| Опция (создание) | Тип | Описание |
+|-------------------|-----|----------|
+| `WithSource(service)` | `OutboundConfig` | Имя сервиса-источника, записывается в `envelope.source` |
 
-**Как работает:** Relay подписывается на `Dispatcher` через `SubscribeAll`. При получении события проверяет, зарегистрировано ли имя, применяет фильтр, сериализует и вызывает `broker.Produce(topic, data)`.
+| Опция (маршрут) | Тип | Описание |
+|------------------|-----|----------|
+| `WithFilter(fn)` | `OutboundOption` | Фильтрация по содержимому события |
+| `WithTransform(fn)` | `OutboundOption` | Кастомная сериализация (обходит Envelope) |
+
+**Как работает:** `OutboundRelay` подписывается на `Dispatcher` через `SubscribeAll`. При получении события проверяет регистрацию по имени, применяет фильтр, оборачивает в Envelope (или вызывает transform), отправляет через `broker.Produce(topic, data)`.
+
+### InboundRelay (очередь → события)
+
+Приём событий из очереди и публикация в локальный Dispatcher.
+
+```go
+inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
+    eventbus.WithServiceName("payment-service"),  // фильтрация собственных событий
+)
+
+// DDD-модуль регистрирует десериализаторы
+func (m *PaymentModule) InboundRelays(inbound *eventbus.InboundRelay) {
+    // Из топика "order.created" события "OrderCreated" → десериализация → Dispatcher
+    inbound.On("order.created", "OrderCreated",
+        func(payload []byte, env *eventbus.Envelope) (events.Event, error) {
+            var data struct {
+                OrderID    string `json:"order_id"`
+                CustomerID string `json:"customer_id"`
+                Total      int    `json:"total"`
+            }
+            if err := json.Unmarshal(payload, &data); err != nil {
+                return nil, err
+            }
+            return &OrderCreatedExternal{
+                BaseEvent:  events.NewBaseEvent("OrderCreated", data.OrderID),
+                CustomerID: data.CustomerID,
+                Total:      data.Total,
+            }, nil
+        },
+    )
+}
+```
+
+**Регистрация в Queue Worker:**
+
+`RunTopic()` возвращает функцию, совместимую с `queueworker.Registration.Run`:
+
+```go
+func (m *PaymentModule) Consumers(qw *queueworker.Module, inbound *eventbus.InboundRelay) {
+    // Для каждого топика — отдельный consumer
+    for _, topic := range inbound.Topics() {
+        qw.Register(queueworker.Registration{
+            Name: "inbound-" + topic,
+            Run:  inbound.RunTopic(topic),
+        })
+    }
+}
+```
+
+| Опция | Тип | Описание |
+|-------|-----|----------|
+| `WithServiceName(name)` | `InboundOption` | Фильтрация собственных событий по `envelope.source` |
+
+**Как работает:** `InboundRelay` вызывает `broker.Consume(topic, handler)`. Каждое сообщение десериализуется из Envelope, по `event_name` находится зарегистрированный `Deserializer`, payload превращается в доменное событие, которое публикуется в локальный `Dispatcher`.
+
+**Защита от циклов:** если `WithServiceName("my-service")` задан и `envelope.source == "my-service"` — событие пропускается.
+
+### Множество событий в одном топике
+
+`InboundRelay` поддерживает несколько типов событий на одном топике:
+
+```go
+inbound.On("order.events", "OrderCreated", orderCreatedDeserializer)
+inbound.On("order.events", "OrderCancelled", orderCancelledDeserializer)
+inbound.On("order.events", "OrderShipped", orderShippedDeserializer)
+
+// Один consumer на весь топик
+qw.Register(queueworker.Registration{
+    Name: "inbound-order-events",
+    Run:  inbound.RunTopic("order.events"),
+})
+```
+
+### Межсервисная коммуникация
+
+Полный цикл: Order Service публикует `OrderCreated` → Payment Service получает и обрабатывает.
+
+**Order Service (отправитель):**
+
+```go
+// bootstrap
+bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
+outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
+    eventbus.WithSource("order-service"),
+)
+outbound.Forward("OrderCreated", "order.created")
+
+// domain — публикация события
+dispatcher.Publish(ctx, &OrderCreated{
+    BaseEvent:  events.NewBaseEvent("OrderCreated", orderID),
+    CustomerID: customerID,
+    Total:      total,
+})
+// → автоматически: Envelope → broker.Produce("order.created", data)
+```
+
+**Payment Service (получатель):**
+
+```go
+// bootstrap
+bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
+inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
+    eventbus.WithServiceName("payment-service"),
+)
+
+// регистрация десериализатора
+inbound.On("order.created", "OrderCreated", deserializeOrderCreated)
+
+// подписка на локальное событие
+events.SubscribeFunc(bus.Dispatcher(), func(ctx context.Context, e *OrderCreatedExternal) error {
+    return paymentService.CreateInvoice(ctx, e.OrderID, e.Total)
+})
+
+// регистрация consumer
+qw.Register(queueworker.Registration{
+    Name: "inbound-order-created",
+    Run:  inbound.RunTopic("order.created"),
+})
+```
 
 ---
 
@@ -662,6 +878,9 @@ func (m *PaymentModule) Consumers(qw *queueworker.Module) {
         },
     })
 }
+
+// Интроспекция
+fmt.Println(qw.ConsumerCount()) // 1
 ```
 
 ### Поведение
@@ -743,8 +962,30 @@ command.MigrateUp(runner)       // migrate:up [--connection=default]
 command.MigrateDown(runner)     // migrate:down [--steps=1] [--force] [--connection=default]
 command.MigrateStatus(runner)   // migrate:status [--connection=default]
 command.MigratePlan(runner)     // migrate:plan [--connection=default]
-command.Health(dbm, broker)     // health
+command.Health(checkers...)     // health (принимает ...HealthChecker)
 command.ConfigDump(cfg)         // config:dump [--no-mask]
+```
+
+### Health — проверка здоровья
+
+`Health()` принимает любое количество компонентов, реализующих `HealthChecker`:
+
+```go
+type HealthChecker interface {
+    Name() string
+    Health(ctx context.Context) error
+}
+```
+
+```go
+// database.Manager реализует HealthChecker
+command.Health(dbm)
+
+// Несколько компонентов
+command.Health(dbm, redisChecker, externalAPIChecker)
+
+// Без проверок — всегда healthy
+command.Health()
 ```
 
 ### Таблица всех команд
@@ -866,7 +1107,6 @@ func main() {
     // ─── Serve Command ──────────────────────
     buildServe := func() cli.Command {
         return command.Serve("myapp", log, 15*time.Second, func() []app.Module {
-            // Эти Get() триггерят создание
             db := dbm.MustGet()
             ev := bus.MustGet()
             om := orderMod.MustGet()
@@ -892,13 +1132,29 @@ func main() {
             om.Listeners(ev.Dispatcher())
             pm.Listeners(ev.Dispatcher())
 
-            // Relay
-            relay := eventbus.NewRelay(ev.Dispatcher(), br, log)
-            om.Relays(relay)
+            // OutboundRelay — события → очередь
+            outbound := eventbus.NewOutboundRelay(ev.Dispatcher(), br, log,
+                eventbus.WithSource("myapp"),
+            )
+            om.Relays(outbound)
 
-            // Queue
+            // InboundRelay — очередь → события
+            inbound := eventbus.NewInboundRelay(ev.Dispatcher(), br, log,
+                eventbus.WithServiceName("myapp"),
+            )
+            pm.InboundRelays(inbound)
+
+            // Queue Workers
             qw := queueworker.NewModule(log)
             pm.Consumers(qw)
+
+            // Inbound consumers
+            for _, topic := range inbound.Topics() {
+                qw.Register(queueworker.Registration{
+                    Name: "inbound-" + topic,
+                    Run:  inbound.RunTopic(topic),
+                })
+            }
 
             return []app.Module{db, ev, server, qw}
         }())
@@ -987,6 +1243,48 @@ func main() {
 }
 ```
 
+### Микросервис с двусторонним Event Bridge
+
+```go
+func main() {
+    k, _ := framework.NewKernel(framework.WithConfigFile("config.yaml"))
+    log := k.Logger()
+
+    bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
+    broker := redisBroker.New(redisClient)
+
+    // Outbound: наши события → очередь
+    outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
+        eventbus.WithSource("payment-service"),
+    )
+    outbound.Forward("PaymentCompleted", "payment.completed")
+    outbound.Forward("PaymentFailed", "payment.failed")
+
+    // Inbound: чужие события → наш Dispatcher
+    inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
+        eventbus.WithServiceName("payment-service"),  // пропускаем свои
+    )
+    inbound.On("order.created", "OrderCreated", deserializeOrderCreated)
+    inbound.On("order.cancelled", "OrderCancelled", deserializeOrderCancelled)
+
+    // Локальные обработчики входящих событий
+    events.SubscribeFunc(bus.Dispatcher(), handleOrderCreated)
+    events.SubscribeFunc(bus.Dispatcher(), handleOrderCancelled)
+
+    // Queue Worker
+    qw := queueworker.NewModule(log)
+    for _, topic := range inbound.Topics() {
+        qw.Register(queueworker.Registration{
+            Name: "inbound-" + topic,
+            Run:  inbound.RunTopic(topic),
+        })
+    }
+
+    k.Command(command.Serve("payment-svc", log, 15*time.Second, bus, qw))
+    k.Run(context.Background(), os.Args[1:])
+}
+```
+
 ---
 
 ## Структура DDD-модуля
@@ -1048,8 +1346,13 @@ func (m *Module) Listeners(d *events.Dispatcher) {
     events.SubscribeFunc(d, m.onPaymentReceived)
 }
 
-func (m *Module) Relays(relay *eventbus.Relay) {
-    relay.Forward("OrderCreated", "order.created")
+func (m *Module) Relays(outbound *eventbus.OutboundRelay) {
+    outbound.Forward("OrderCreated", "order.created")
+    outbound.Forward("OrderCancelled", "order.cancelled")
+}
+
+func (m *Module) InboundRelays(inbound *eventbus.InboundRelay) {
+    inbound.On("payment.completed", "PaymentCompleted", m.deserializePaymentCompleted)
 }
 
 func (m *Module) Migrations(runner *migration.Runner) {
@@ -1080,7 +1383,7 @@ shuldan/framework/
 ├── httpserver/
 │   ├── config.go              — Config (host, port, timeouts)
 │   ├── errors.go              — ErrEmptyBody, ErrBodyTooLarge, ErrInvalidJSON
-│   ├── middleware.go           — Middleware type, applyChain
+│   ├── middleware.go          — Middleware type, applyChain
 │   ├── router.go              — Router: обёртка ServeMux
 │   ├── server.go              — Module: app.BackgroundModule
 │   ├── request.go             — Bind, PathParam, QueryParam
@@ -1094,7 +1397,12 @@ shuldan/framework/
 ├── eventbus/
 │   ├── config.go              — Config → events.Option
 │   ├── module.go              — Module: app.Module
-│   └── relay.go               — Relay: Event → Queue
+│   ├── envelope.go            — Envelope: стандартный формат сообщений
+│   ├── logger.go              — Logger interface
+│   ├── outbound.go            — OutboundRelay: Event → Queue
+│   ├── outbound_option.go     — WithSource, WithFilter, WithTransform
+│   ├── inbound.go             — InboundRelay: Queue → Event
+│   └── inbound_option.go      — WithServiceName
 │
 ├── queueworker/
 │   └── module.go              — Module: app.BackgroundModule
@@ -1110,7 +1418,7 @@ shuldan/framework/
     ├── migrate_down.go        — migrate:down
     ├── migrate_status.go      — migrate:status
     ├── migrate_plan.go        — migrate:plan
-    ├── health.go              — health
+    ├── health.go              — health (HealthChecker interface)
     └── config_dump.go         — config:dump
 ```
 
@@ -1210,6 +1518,7 @@ make install-tools
 - Функции ≤ 60 строк, ≤ 40 выражений
 - Нет circular imports между пакетами
 - Middleware принимают функции, не конкретные типы
+- Каждый пакет определяет свой Logger interface (structural typing)
 
 ---
 

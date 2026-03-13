@@ -6,18 +6,20 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/shuldan/events"
 )
 
-func TestRelay_ForwardsRegisteredEvent(t *testing.T) {
+func TestOutboundRelay_ForwardsWithEnvelope(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
+	relay := NewOutboundRelay(d, broker, nil, WithSource("test-svc"))
 	defer relay.Unsubscribe()
+
 	relay.Forward("test", "test-topic")
+
 	err := d.Publish(context.Background(), &testEvent{
 		BaseEvent: events.NewBaseEvent("test", "agg-1"),
 		Value:     "hello",
@@ -25,6 +27,7 @@ func TestRelay_ForwardsRegisteredEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
+
 	msgs := broker.Messages()
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
@@ -32,60 +35,45 @@ func TestRelay_ForwardsRegisteredEvent(t *testing.T) {
 	if msgs[0].topic != "test-topic" {
 		t.Errorf("expected topic 'test-topic', got %q", msgs[0].topic)
 	}
-	assertJSONContains(t, msgs[0].data, "hello")
-}
 
-func TestRelay_IgnoresUnregisteredEvent(t *testing.T) {
-	d := events.New(events.WithSyncMode())
-	defer func() { _ = d.Close(context.Background()) }()
-	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
-	defer relay.Unsubscribe()
-	relay.Forward("other", "other-topic")
-	_ = d.Publish(context.Background(), &testEvent{
-		BaseEvent: events.NewBaseEvent("test", "agg-1"),
-	})
-	if len(broker.Messages()) != 0 {
-		t.Fatal("expected no messages for unregistered event")
+	var env Envelope
+	if err := json.Unmarshal(msgs[0].data, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
 	}
-}
-
-func TestRelay_Filter(t *testing.T) {
-	d := events.New(events.WithSyncMode())
-	defer func() { _ = d.Close(context.Background()) }()
-	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
-	defer relay.Unsubscribe()
-	relay.Forward("test", "filtered-topic",
-		WithFilter(func(e events.Event) bool {
-			te, ok := e.(*testEvent)
-			return ok && te.Value == "pass"
-		}),
-	)
-	ctx := context.Background()
-	_ = d.Publish(ctx, &testEvent{BaseEvent: events.NewBaseEvent("test", "1"), Value: "reject"})
-	_ = d.Publish(ctx, &testEvent{BaseEvent: events.NewBaseEvent("test", "2"), Value: "pass"})
-	msgs := broker.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	if env.EventName != "test" {
+		t.Errorf("expected event_name 'test', got %q", env.EventName)
 	}
-	assertJSONContains(t, msgs[0].data, "pass")
+	if env.AggregateID != "agg-1" {
+		t.Errorf("expected aggregate_id 'agg-1', got %q", env.AggregateID)
+	}
+	if env.Source != "test-svc" {
+		t.Errorf("expected source 'test-svc', got %q", env.Source)
+	}
+	if env.Payload == nil {
+		t.Fatal("expected non-nil payload")
+	}
+
+	assertJSONContains(t, env.Payload, "hello")
 }
 
-func TestRelay_CustomTransform(t *testing.T) {
+func TestOutboundRelay_ForwardsWithTransform(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
+	relay := NewOutboundRelay(d, broker, nil)
 	defer relay.Unsubscribe()
+
 	relay.Forward("test", "custom-topic",
 		WithTransform(func(e events.Event) ([]byte, error) {
 			return []byte("custom:" + e.AggregateID()), nil
 		}),
 	)
+
 	_ = d.Publish(context.Background(), &testEvent{
 		BaseEvent: events.NewBaseEvent("test", "agg-99"),
 	})
+
 	msgs := broker.Messages()
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
@@ -95,32 +83,83 @@ func TestRelay_CustomTransform(t *testing.T) {
 	}
 }
 
-func TestRelay_TransformError(t *testing.T) {
+func TestOutboundRelay_IgnoresUnregisteredEvent(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
+	relay := NewOutboundRelay(d, broker, nil)
 	defer relay.Unsubscribe()
+
+	relay.Forward("other", "other-topic")
+
+	_ = d.Publish(context.Background(), &testEvent{
+		BaseEvent: events.NewBaseEvent("test", "agg-1"),
+	})
+
+	if len(broker.Messages()) != 0 {
+		t.Fatal("expected no messages for unregistered event")
+	}
+}
+
+func TestOutboundRelay_Filter(t *testing.T) {
+	d := events.New(events.WithSyncMode())
+	defer func() { _ = d.Close(context.Background()) }()
+
+	broker := &mockBroker{}
+	relay := NewOutboundRelay(d, broker, nil)
+	defer relay.Unsubscribe()
+
+	relay.Forward("test", "filtered-topic",
+		WithFilter(func(e events.Event) bool {
+			te, ok := e.(*testEvent)
+			return ok && te.Value == "pass"
+		}),
+	)
+
+	ctx := context.Background()
+	_ = d.Publish(ctx, &testEvent{BaseEvent: events.NewBaseEvent("test", "1"), Value: "reject"})
+	_ = d.Publish(ctx, &testEvent{BaseEvent: events.NewBaseEvent("test", "2"), Value: "pass"})
+
+	msgs := broker.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+}
+
+func TestOutboundRelay_TransformError(t *testing.T) {
+	d := events.New(events.WithSyncMode())
+	defer func() { _ = d.Close(context.Background()) }()
+
+	broker := &mockBroker{}
+	relay := NewOutboundRelay(d, broker, nil)
+	defer relay.Unsubscribe()
+
 	relay.Forward("test", "err-topic",
 		WithTransform(func(_ events.Event) ([]byte, error) {
 			return nil, errors.New("transform fail")
 		}),
 	)
+
 	_ = d.Publish(context.Background(), &testEvent{
 		BaseEvent: events.NewBaseEvent("test", "agg-1"),
 	})
+
 	if len(broker.Messages()) != 0 {
 		t.Fatal("expected no messages when transform fails")
 	}
 }
 
-func TestRelay_ProduceError(t *testing.T) {
+func TestOutboundRelay_ProduceError(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	broker := &errorBroker{err: errors.New("produce fail")}
-	relay := NewRelay(d, broker, nil)
+	relay := NewOutboundRelay(d, broker, nil)
 	defer relay.Unsubscribe()
+
 	relay.Forward("test", "err-topic")
+
 	err := d.Publish(context.Background(), &testEvent{
 		BaseEvent: events.NewBaseEvent("test", "agg-1"),
 	})
@@ -129,37 +168,71 @@ func TestRelay_ProduceError(t *testing.T) {
 	}
 }
 
-func TestRelay_Unsubscribe(t *testing.T) {
+func TestOutboundRelay_Unsubscribe(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	broker := &mockBroker{}
-	relay := NewRelay(d, broker, nil)
+	relay := NewOutboundRelay(d, broker, nil)
 	relay.Forward("test", "topic")
 	relay.Unsubscribe()
+
 	_ = d.Publish(context.Background(), &testEvent{
 		BaseEvent: events.NewBaseEvent("test", "1"),
 	})
+
 	if len(broker.Messages()) != 0 {
 		t.Fatal("expected no messages after unsubscribe")
 	}
 }
 
-func TestRelay_UnsubscribeNilSub(t *testing.T) {
+func TestOutboundRelay_UnsubscribeNilSub(t *testing.T) {
 	t.Parallel()
-	r := &Relay{}
+	r := &OutboundRelay{}
 	r.Unsubscribe()
 }
 
-func TestRelay_WithLogger(t *testing.T) {
+func TestOutboundRelay_WithLogger(t *testing.T) {
 	d := events.New(events.WithSyncMode())
 	defer func() { _ = d.Close(context.Background()) }()
+
 	ml := &relayMockLogger{}
 	broker := &mockBroker{}
-	relay := NewRelay(d, broker, ml)
+	relay := NewOutboundRelay(d, broker, ml)
 	defer relay.Unsubscribe()
+
 	relay.Forward("test", "topic")
+
 	if !ml.infoCalled {
 		t.Error("expected Info called during Forward")
+	}
+}
+
+func TestOutboundRelay_NoSource(t *testing.T) {
+	d := events.New(events.WithSyncMode())
+	defer func() { _ = d.Close(context.Background()) }()
+
+	broker := &mockBroker{}
+	relay := NewOutboundRelay(d, broker, nil)
+	defer relay.Unsubscribe()
+
+	relay.Forward("test", "topic")
+
+	_ = d.Publish(context.Background(), &testEvent{
+		BaseEvent: events.NewBaseEvent("test", "agg-1"),
+	})
+
+	msgs := broker.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	var env Envelope
+	if err := json.Unmarshal(msgs[0].data, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Source != "" {
+		t.Errorf("expected empty source, got %q", env.Source)
 	}
 }
 
@@ -186,6 +259,8 @@ func TestNoopRelayLogger(t *testing.T) {
 	l.Info("test")
 	l.Error("test")
 }
+
+// --- test helpers ---
 
 type relayMockLogger struct {
 	infoCalled  bool
@@ -237,18 +312,18 @@ func assertJSONContains(t *testing.T, data []byte, substr string) {
 	t.Helper()
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
-		if s := string(data); s != substr {
+		if s := string(data); !containsStr(s, substr) {
 			t.Errorf("expected %q in %q", substr, s)
 		}
 		return
 	}
 	encoded, _ := json.Marshal(raw)
-	if s := string(encoded); !findInStr(s, substr) {
+	if s := string(encoded); !containsStr(s, substr) {
 		t.Errorf("expected %q in JSON: %s", substr, s)
 	}
 }
 
-func findInStr(s, sub string) bool {
+func containsStr(s, sub string) bool {
 	for i := 0; i <= len(s)-len(sub); i++ {
 		if s[i:i+len(sub)] == sub {
 			return true
@@ -256,5 +331,3 @@ func findInStr(s, sub string) bool {
 	}
 	return false
 }
-
-var _ = time.After

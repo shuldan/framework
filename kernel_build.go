@@ -76,7 +76,7 @@ func buildLogger(
 }
 
 func buildConsole(
-	cfg *config.Config, o *kernelOptions,
+	cfg *config.Config,
 ) *cli.Console {
 	consoleOpts := []cli.ConsoleOption{
 		cli.WithName(cfg.GetString("app.name", "app")),

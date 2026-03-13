@@ -31,7 +31,7 @@ func NewKernel(opts ...KernelOption) (*Kernel, error) {
 	}
 
 	log := buildLogger(cfg, o)
-	console := buildConsole(cfg, o)
+	console := buildConsole(cfg)
 
 	return &Kernel{
 		cfg:     cfg,
