@@ -2,6 +2,7 @@ package commandbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -183,5 +184,122 @@ func TestCommandSender_Send_EmptyIdempotencyKey(t *testing.T) {
 	env := mustUnmarshalCommandEnvelope(msgs[0])
 	if env.IdempotencyKey == "" {
 		t.Error("expected auto-generated idempotency key")
+	}
+}
+
+type unmarshalableCommand struct {
+	Name string `json:"name"`
+	Ch   chan int
+}
+
+func (u *unmarshalableCommand) CommandName() string    { return u.Name }
+func (u *unmarshalableCommand) IdempotencyKey() string { return "" }
+
+func TestCommandSender_Send_MarshalEnvelopeError(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	s := NewCommandSender(br, nil)
+	s.Forward("fail-marshal")
+	cmd := &failMarshalCommand{}
+	err := s.Send(context.Background(), cmd)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errContains(err, "build envelope") || !errContains(err, "marshal") {
+		t.Errorf("expected marshal error in build envelope, got %v", err)
+	}
+}
+
+func TestCommandSender_BuildEnvelope_EmptyIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	s := NewCommandSender(br, nil)
+	s.Forward("test.cmd")
+	cmd := &stubCommand{Name: "test.cmd", Payload: "data"}
+	err := s.Send(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := br.getMessages("commands.test.cmd")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	env := mustUnmarshalCommandEnvelope(msgs[0])
+	if env.IdempotencyKey == "" {
+		t.Error("expected auto-generated UUID idempotency key")
+	}
+	if len(env.IdempotencyKey) < 32 {
+		t.Errorf("expected UUID-like key, got %q", env.IdempotencyKey)
+	}
+}
+
+func TestCommandSender_BuildEnvelope_NonEmptyIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	s := NewCommandSender(br, nil)
+	s.Forward("test.cmd")
+	cmd := &stubCommand{Name: "test.cmd", Payload: "data"}
+	cmd.IdemKey = "my-custom-key"
+	err := s.Send(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := br.getMessages("commands.test.cmd")
+	env := mustUnmarshalCommandEnvelope(msgs[0])
+	if env.IdempotencyKey != "my-custom-key" {
+		t.Errorf("expected %q, got %q", "my-custom-key", env.IdempotencyKey)
+	}
+}
+
+func TestCommandSender_Send_VerifyEnvelopeFields(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	s := NewCommandSender(br, nil,
+		WithReplyTo("rpc-svc"),
+		WithSender("api-gw"),
+	)
+	s.Forward("test.cmd")
+	cmd := &stubCommand{Name: "test.cmd", Payload: "verify"}
+	cmd.IdemKey = "verify-key"
+	err := s.Send(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := br.getMessages("commands.test.cmd")
+	env := mustUnmarshalCommandEnvelope(msgs[0])
+	if env.Sender != "api-gw" {
+		t.Errorf("expected sender %q, got %q", "api-gw", env.Sender)
+	}
+	if env.CommandName != "test.cmd" {
+		t.Errorf("expected command %q, got %q", "test.cmd", env.CommandName)
+	}
+	if env.CorrelationID == "" {
+		t.Error("expected non-empty correlation ID")
+	}
+	if env.CreatedAt.IsZero() {
+		t.Error("expected non-zero created_at")
+	}
+	var payload stubCommand
+	if unmErr := json.Unmarshal(env.Payload, &payload); unmErr != nil {
+		t.Fatalf("unmarshal payload: %v", unmErr)
+	}
+	if payload.Payload != "verify" {
+		t.Errorf("expected payload %q, got %q", "verify", payload.Payload)
+	}
+}
+
+func TestCommandSender_Send_MarshalCommandEnvelopeStruct(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	br.prodErr = errors.New("should not reach")
+	s := NewCommandSender(br, nil)
+	s.Forward("fail-marshal")
+	cmd := &failMarshalCommand{}
+	err := s.Send(context.Background(), cmd)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errContains(err, "should not reach") {
+		t.Error("should not have reached broker.Produce")
 	}
 }

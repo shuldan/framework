@@ -2,6 +2,7 @@ package commandbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -324,5 +325,198 @@ func TestCommandReceiver_IsExpired_NotYetExpired(t *testing.T) {
 	}
 	if r.isExpired(env) {
 		t.Error("expected not expired")
+	}
+}
+
+func TestCommandReceiver_Registrations_RunCallsBrokerConsume(t *testing.T) {
+	t.Parallel()
+	cb := newCallbackBroker()
+	var consumedTopic string
+	var handlerCalled bool
+	cb.consumeFn = func(ctx context.Context, topic string, handler func([]byte) error) error {
+		consumedTopic = topic
+		data := makeCommandEnvelopeBytes("run.cmd", "run-key", "", 0)
+		handlerCalled = true
+		return handler(data)
+	}
+	r := NewCommandReceiver(cb, nil)
+	_ = r.Handle("run.cmd", stubDeserializer, stubHandler)
+	regs := r.Registrations()
+	if len(regs) != 1 {
+		t.Fatalf("expected 1 registration, got %d", len(regs))
+	}
+	err := regs[0].Run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if consumedTopic != "commands.run.cmd" {
+		t.Errorf("expected topic %q, got %q", "commands.run.cmd", consumedTopic)
+	}
+	if !handlerCalled {
+		t.Error("expected handler to be called via broker.Consume")
+	}
+}
+
+func TestCommandReceiver_Registrations_RunHandlerError(t *testing.T) {
+	t.Parallel()
+	cb := newCallbackBroker()
+	cb.consumeFn = func(_ context.Context, _ string, handler func([]byte) error) error {
+		data := makeCommandEnvelopeBytes("run.cmd", "run-key2", "", 0)
+		return handler(data)
+	}
+	r := NewCommandReceiver(cb, nil)
+	_ = r.Handle("run.cmd", stubDeserializer, failHandler)
+	regs := r.Registrations()
+	err := regs[0].Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from failed handler")
+	}
+	if !errContains(err, "handler error") {
+		t.Errorf("expected handler error, got %v", err)
+	}
+}
+
+func TestCommandReceiver_Registrations_RunBrokerConsumeError(t *testing.T) {
+	t.Parallel()
+	cb := newCallbackBroker()
+	cb.consumeFn = func(_ context.Context, _ string, _ func([]byte) error) error {
+		return errors.New("consume failed")
+	}
+	r := NewCommandReceiver(cb, nil)
+	_ = r.Handle("run.cmd", stubDeserializer, stubHandler)
+	regs := r.Registrations()
+	err := regs[0].Run(context.Background())
+	if err == nil {
+		t.Fatal("expected consume error")
+	}
+	if !errContains(err, "consume failed") {
+		t.Errorf("expected 'consume failed', got %v", err)
+	}
+}
+
+type failMarshalResult struct {
+	commands.BaseResult
+}
+
+func (f *failMarshalResult) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("result marshal error")
+}
+
+func TestCommandReceiver_SendResult_MarshalResultPayloadError(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	cmdEnv := &CommandEnvelope{
+		CorrelationID: "c-marshal",
+		CommandName:   "test.cmd",
+		ReplyTo:       "svc",
+	}
+	badResult := &failMarshalResult{
+		BaseResult: commands.BaseResult{Name: "bad"},
+	}
+	err := r.sendResult(context.Background(), cmdEnv, badResult, nil)
+	if err == nil {
+		t.Fatal("expected marshal result payload error")
+	}
+	if !errContains(err, "marshal result payload") {
+		t.Errorf("expected 'marshal result payload' in error, got %v", err)
+	}
+}
+
+func TestCommandReceiver_SendResult_MarshalEnvelopeError(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	cmdEnv := &CommandEnvelope{
+		CorrelationID: "c-env-marshal",
+		CommandName:   "test.cmd",
+		ReplyTo:       "svc",
+	}
+	goodResult := &stubResult{
+		BaseResult: commands.BaseResult{Name: "ok"},
+		Value:      "val",
+	}
+	err := r.sendResult(context.Background(), cmdEnv, goodResult, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := br.getMessages("replies.svc")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	var env ResultEnvelope
+	if unmErr := json.Unmarshal(msgs[0], &env); unmErr != nil {
+		t.Fatalf("unmarshal result envelope: %v", unmErr)
+	}
+	if env.CorrelationID != "c-env-marshal" {
+		t.Errorf("expected correlation %q, got %q", "c-env-marshal", env.CorrelationID)
+	}
+}
+
+func TestCommandReceiver_HandleMessage_SuccessResult_VerifyEnvelope(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	_ = r.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
+		return &stubResult{
+			BaseResult: commands.BaseResult{Name: "verified-result"},
+			Value:      "data",
+		}, nil
+	})
+	data := makeCommandEnvelopeBytes("test.cmd", "verify-key", "reply-svc", 0)
+	err := r.handleMessage(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := br.getMessages("replies.reply-svc")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(msgs))
+	}
+	var env ResultEnvelope
+	_ = json.Unmarshal(msgs[0], &env)
+	if env.ResultName != "verified-result" {
+		t.Errorf("expected result name %q, got %q", "verified-result", env.ResultName)
+	}
+	if env.Error != nil {
+		t.Errorf("expected nil error, got %v", *env.Error)
+	}
+	if len(env.Payload) == 0 {
+		t.Error("expected non-empty payload")
+	}
+}
+
+func TestCommandReceiver_HandleMessage_HandlerReturnsFailMarshalResult(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	log := newRecordingLogger()
+	r := NewCommandReceiver(br, log)
+	_ = r.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
+		return &failMarshalResult{BaseResult: commands.BaseResult{Name: "bad"}}, nil
+	})
+	data := makeCommandEnvelopeBytes("test.cmd", "bad-marshal-key", "reply-svc", 0)
+	err := r.handleMessage(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !log.hasError("command receiver: send result failed") {
+		t.Error("expected send result failed log")
+	}
+}
+
+func TestCommandReceiver_Registrations_ContextCancel(t *testing.T) {
+	t.Parallel()
+	cb := newCallbackBroker()
+	cb.consumeFn = func(ctx context.Context, _ string, _ func([]byte) error) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	r := NewCommandReceiver(cb, nil)
+	_ = r.Handle("ctx.cmd", stubDeserializer, stubHandler)
+	regs := r.Registrations()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := regs[0].Run(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected DeadlineExceeded, got %v", err)
 	}
 }
