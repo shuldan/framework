@@ -23,12 +23,14 @@ func TestIntegration_SendAndReceive(t *testing.T) {
 	receiver := NewCommandReceiver(br, nil)
 	var mu sync.Mutex
 	var received commands.Command
-	_ = receiver.Handle("test.cmd", stubDeserializer, func(ctx context.Context, cmd commands.Command) (commands.Result, error) {
-		mu.Lock()
-		received = cmd
-		mu.Unlock()
-		return &stubResult{BaseResult: commands.BaseResult{Name: "ok"}, Value: "done"}, nil
-	})
+	_ = receiver.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, cmd commands.Command) (commands.Result, error) {
+			mu.Lock()
+			received = cmd
+			mu.Unlock()
+			return &stubResult{BaseResult: commands.BaseResult{Name: "ok"}, Value: "done"}, nil
+		}),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,6 +59,43 @@ func TestIntegration_SendAndReceive(t *testing.T) {
 	}
 }
 
+func TestIntegration_SendAndReceive_StructHandler(t *testing.T) {
+	t.Parallel()
+	br := memory.New()
+	t.Cleanup(func() { br.Close() })
+
+	sender := NewCommandSender(br, nil, WithReplyTo("test-svc"), WithSender("origin"))
+	sender.Forward("test.cmd")
+
+	receiver := NewCommandReceiver(br, nil)
+	handler := &structCommandHandler{value: "integration-struct"}
+	_ = receiver.Handle("test.cmd", stubDeserializer, handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = br.Consume(ctx, "commands.test.cmd", func(data []byte) error {
+			return receiver.handleMessage(ctx, data)
+		})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	cmd := &stubCommand{Name: "test.cmd", Payload: "struct-int"}
+	cmd.IdemKey = "int-struct-key"
+	err := sender.Send(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	if !handler.wasCalled() {
+		t.Fatal("expected struct handler to be called")
+	}
+}
+
 func TestIntegration_SendReceiveReply(t *testing.T) {
 	t.Parallel()
 	br := memory.New()
@@ -66,19 +105,23 @@ func TestIntegration_SendReceiveReply(t *testing.T) {
 	sender.Forward("test.cmd")
 
 	receiver := NewCommandReceiver(br, nil)
-	_ = receiver.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
-		return &stubResult{BaseResult: commands.BaseResult{Name: "res"}, Value: "hello"}, nil
-	})
+	_ = receiver.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			return &stubResult{BaseResult: commands.BaseResult{Name: "res"}, Value: "hello"}, nil
+		}),
+	)
 
 	listener := NewReplyListener(br, nil, WithListenerServiceName("reply-svc"))
 	var mu sync.Mutex
 	var gotResult commands.Result
-	listener.OnResult("test.cmd", stubResultDeserializer, func(_ context.Context, r commands.Result, _ error) error {
-		mu.Lock()
-		gotResult = r
-		mu.Unlock()
-		return nil
-	})
+	listener.OnResult("test.cmd", stubResultDeserializer,
+		ResultCallbackFunc(func(_ context.Context, r commands.Result, _ error) error {
+			mu.Lock()
+			gotResult = r
+			mu.Unlock()
+			return nil
+		}),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -111,6 +154,57 @@ func TestIntegration_SendReceiveReply(t *testing.T) {
 	}
 }
 
+func TestIntegration_SendReceiveReply_StructCallback(t *testing.T) {
+	t.Parallel()
+	br := memory.New()
+	t.Cleanup(func() { br.Close() })
+
+	sender := NewCommandSender(br, nil, WithReplyTo("reply-svc"), WithSender("origin"))
+	sender.Forward("test.cmd")
+
+	receiver := NewCommandReceiver(br, nil)
+	_ = receiver.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			return &stubResult{BaseResult: commands.BaseResult{Name: "res"}, Value: "hello"}, nil
+		}),
+	)
+
+	listener := NewReplyListener(br, nil, WithListenerServiceName("reply-svc"))
+	cb := &structResultCallback{}
+	listener.OnResult("test.cmd", stubResultDeserializer, cb)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = br.Consume(ctx, "commands.test.cmd", func(data []byte) error {
+			return receiver.handleMessage(ctx, data)
+		})
+	}()
+
+	go func() {
+		_ = listener.Run(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	cmd := &stubCommand{Name: "test.cmd", Payload: "e2e-struct"}
+	cmd.IdemKey = "e2e-struct-key"
+	err := sender.Send(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	if !cb.wasCalled() {
+		t.Fatal("expected struct callback to be called")
+	}
+	if cb.result() == nil {
+		t.Fatal("expected result in struct callback")
+	}
+}
+
 func TestIntegration_Idempotency(t *testing.T) {
 	t.Parallel()
 	br := memory.New()
@@ -121,12 +215,14 @@ func TestIntegration_Idempotency(t *testing.T) {
 
 	var callCount int
 	var mu sync.Mutex
-	_ = receiver.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
-		mu.Lock()
-		callCount++
-		mu.Unlock()
-		return &stubResult{BaseResult: commands.BaseResult{Name: "r"}}, nil
-	})
+	_ = receiver.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			mu.Lock()
+			callCount++
+			mu.Unlock()
+			return &stubResult{BaseResult: commands.BaseResult{Name: "r"}}, nil
+		}),
+	)
 
 	data := makeCommandEnvelopeBytes("test.cmd", "same-key", "", 0)
 
@@ -152,12 +248,14 @@ func TestIntegration_ExpiredCommand_ReplyError(t *testing.T) {
 	listener := NewReplyListener(br, nil, WithListenerServiceName("reply-svc"))
 	var mu sync.Mutex
 	var gotErr error
-	listener.OnResult("test.cmd", stubResultDeserializer, func(_ context.Context, _ commands.Result, err error) error {
-		mu.Lock()
-		gotErr = err
-		mu.Unlock()
-		return nil
-	})
+	listener.OnResult("test.cmd", stubResultDeserializer,
+		ResultCallbackFunc(func(_ context.Context, _ commands.Result, err error) error {
+			mu.Lock()
+			gotErr = err
+			mu.Unlock()
+			return nil
+		}),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -194,12 +292,14 @@ func TestIntegration_HandlerError_ReplyError(t *testing.T) {
 	listener := NewReplyListener(br, nil, WithListenerServiceName("reply-svc"))
 	var mu sync.Mutex
 	var gotErr error
-	listener.OnResult("test.cmd", stubResultDeserializer, func(_ context.Context, _ commands.Result, err error) error {
-		mu.Lock()
-		gotErr = err
-		mu.Unlock()
-		return nil
-	})
+	listener.OnResult("test.cmd", stubResultDeserializer,
+		ResultCallbackFunc(func(_ context.Context, _ commands.Result, err error) error {
+			mu.Lock()
+			gotErr = err
+			mu.Unlock()
+			return nil
+		}),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

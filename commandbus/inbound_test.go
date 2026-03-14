@@ -49,6 +49,40 @@ func TestCommandReceiver_Handle_Success(t *testing.T) {
 	}
 }
 
+func TestCommandReceiver_Handle_WithFunc(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	err := r.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			return &stubResult{BaseResult: commands.BaseResult{Name: "fn"}, Value: "ok"}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCommandReceiver_Handle_WithStruct(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	handler := &structCommandHandler{value: "from-struct"}
+	err := r.Handle("test.cmd", stubDeserializer, handler)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data := makeCommandEnvelopeBytes("test.cmd", "struct-key", "", 0)
+	err = r.handleMessage(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handler.called {
+		t.Error("expected struct handler to be called")
+	}
+}
+
 func TestCommandReceiver_Handle_Duplicate(t *testing.T) {
 	t.Parallel()
 	br := newStubBroker()
@@ -333,7 +367,7 @@ func TestCommandReceiver_Registrations_RunCallsBrokerConsume(t *testing.T) {
 	cb := newCallbackBroker()
 	var consumedTopic string
 	var handlerCalled bool
-	cb.consumeFn = func(ctx context.Context, topic string, handler func([]byte) error) error {
+	cb.consumeFn = func(_ context.Context, topic string, handler func([]byte) error) error {
 		consumedTopic = topic
 		data := makeCommandEnvelopeBytes("run.cmd", "run-key", "", 0)
 		handlerCalled = true
@@ -457,12 +491,14 @@ func TestCommandReceiver_HandleMessage_SuccessResult_VerifyEnvelope(t *testing.T
 	t.Parallel()
 	br := newStubBroker()
 	r := NewCommandReceiver(br, nil)
-	_ = r.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
-		return &stubResult{
-			BaseResult: commands.BaseResult{Name: "verified-result"},
-			Value:      "data",
-		}, nil
-	})
+	_ = r.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			return &stubResult{
+				BaseResult: commands.BaseResult{Name: "verified-result"},
+				Value:      "data",
+			}, nil
+		}),
+	)
 	data := makeCommandEnvelopeBytes("test.cmd", "verify-key", "reply-svc", 0)
 	err := r.handleMessage(context.Background(), data)
 	if err != nil {
@@ -490,9 +526,11 @@ func TestCommandReceiver_HandleMessage_HandlerReturnsFailMarshalResult(t *testin
 	br := newStubBroker()
 	log := newRecordingLogger()
 	r := NewCommandReceiver(br, log)
-	_ = r.Handle("test.cmd", stubDeserializer, func(_ context.Context, _ commands.Command) (commands.Result, error) {
-		return &failMarshalResult{BaseResult: commands.BaseResult{Name: "bad"}}, nil
-	})
+	_ = r.Handle("test.cmd", stubDeserializer,
+		CommandHandlerFunc(func(_ context.Context, _ commands.Command) (commands.Result, error) {
+			return &failMarshalResult{BaseResult: commands.BaseResult{Name: "bad"}}, nil
+		}),
+	)
 	data := makeCommandEnvelopeBytes("test.cmd", "bad-marshal-key", "reply-svc", 0)
 	err := r.handleMessage(context.Background(), data)
 	if err != nil {
@@ -518,5 +556,47 @@ func TestCommandReceiver_Registrations_ContextCancel(t *testing.T) {
 	err := regs[0].Run(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected DeadlineExceeded, got %v", err)
+	}
+}
+
+func TestCommandReceiver_HandleMessage_StructHandler_WithReply(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	r := NewCommandReceiver(br, nil)
+	handler := &structCommandHandler{value: "struct-reply"}
+	_ = r.Handle("test.cmd", stubDeserializer, handler)
+	data := makeCommandEnvelopeBytes("test.cmd", "struct-reply-key", "reply-svc", 0)
+	err := r.handleMessage(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handler.called {
+		t.Error("expected struct handler to be called")
+	}
+	msgs := br.getMessages("replies.reply-svc")
+	if len(msgs) == 0 {
+		t.Fatal("expected reply message from struct handler")
+	}
+	var env ResultEnvelope
+	_ = json.Unmarshal(msgs[0], &env)
+	if env.ResultName != "struct-result" {
+		t.Errorf("expected result name %q, got %q", "struct-result", env.ResultName)
+	}
+}
+
+func TestCommandReceiver_HandleMessage_StructHandler_Error(t *testing.T) {
+	t.Parallel()
+	br := newStubBroker()
+	log := newRecordingLogger()
+	r := NewCommandReceiver(br, log)
+	handler := &structCommandHandler{value: "err", shouldFail: true}
+	_ = r.Handle("test.cmd", stubDeserializer, handler)
+	data := makeCommandEnvelopeBytes("test.cmd", "struct-fail-key", "", 0)
+	err := r.handleMessage(context.Background(), data)
+	if err == nil {
+		t.Fatal("expected error from struct handler")
+	}
+	if !errContains(err, "struct handler error") {
+		t.Errorf("expected struct handler error, got %v", err)
 	}
 }

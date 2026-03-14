@@ -23,14 +23,26 @@ type CommandDeserializer func(
 	payload []byte, env *CommandEnvelope,
 ) (commands.Command, error)
 
-// CommandHandlerFunc обрабатывает команду и возвращает результат.
+// CommandHandler обрабатывает команду и возвращает результат.
+type CommandHandler interface {
+	Handle(ctx context.Context, cmd commands.Command) (commands.Result, error)
+}
+
+// CommandHandlerFunc — адаптер для использования функции как CommandHandler.
 type CommandHandlerFunc func(
 	ctx context.Context, cmd commands.Command,
 ) (commands.Result, error)
 
+// Handle реализует интерфейс CommandHandler.
+func (f CommandHandlerFunc) Handle(
+	ctx context.Context, cmd commands.Command,
+) (commands.Result, error) {
+	return f(ctx, cmd)
+}
+
 type inboundEntry struct {
 	deserializer CommandDeserializer
-	handler      CommandHandlerFunc
+	handler      CommandHandler
 	idemTTL      time.Duration
 }
 
@@ -77,7 +89,7 @@ func NewCommandReceiver(
 func (r *CommandReceiver) Handle(
 	commandName string,
 	deserializer CommandDeserializer,
-	handler CommandHandlerFunc,
+	handler CommandHandler,
 	opts ...HandleOption,
 ) error {
 	r.mu.Lock()
@@ -243,7 +255,7 @@ func (r *CommandReceiver) executeAndReply(
 		return nil
 	}
 
-	result, handleErr := entry.handler(ctx, cmd)
+	result, handleErr := entry.handler.Handle(ctx, cmd)
 
 	if handleErr != nil {
 		r.logger.Error("command receiver: handler error",

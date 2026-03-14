@@ -15,14 +15,26 @@ type ResultDeserializer func(
 	payload []byte, env *ResultEnvelope,
 ) (commands.Result, error)
 
-// ResultCallbackFunc обрабатывает результат выполнения команды.
+// ResultCallback обрабатывает результат выполнения команды.
+type ResultCallback interface {
+	OnResult(ctx context.Context, result commands.Result, err error) error
+}
+
+// ResultCallbackFunc — адаптер для использования функции как ResultCallback.
 type ResultCallbackFunc func(
 	ctx context.Context, result commands.Result, err error,
 ) error
 
+// OnResult реализует интерфейс ResultCallback.
+func (f ResultCallbackFunc) OnResult(
+	ctx context.Context, result commands.Result, err error,
+) error {
+	return f(ctx, result, err)
+}
+
 type replyEntry struct {
 	deserializer ResultDeserializer
-	handler      ResultCallbackFunc
+	handler      ResultCallback
 }
 
 // ReplyListener слушает топик ответов и маршрутизирует результаты.
@@ -58,7 +70,7 @@ func NewReplyListener(
 func (l *ReplyListener) OnResult(
 	commandName string,
 	deserializer ResultDeserializer,
-	handler ResultCallbackFunc,
+	handler ResultCallback,
 ) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -121,7 +133,7 @@ func (l *ReplyListener) processResult(
 	entry *replyEntry,
 ) error {
 	if env.Error != nil {
-		callbackErr := entry.handler(
+		callbackErr := entry.handler.OnResult(
 			ctx, nil, errors.New(*env.Error),
 		)
 
@@ -147,7 +159,7 @@ func (l *ReplyListener) processResult(
 		return nil
 	}
 
-	if callbackErr := entry.handler(ctx, result, nil); callbackErr != nil {
+	if callbackErr := entry.handler.OnResult(ctx, result, nil); callbackErr != nil {
 		return fmt.Errorf(
 			"reply listener: handler %s: %w",
 			env.CommandName, callbackErr,
