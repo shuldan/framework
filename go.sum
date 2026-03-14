@@ -8,6 +8,8 @@ github.com/shuldan/app v0.0.0-20260214215613-1dae55f6dd83 h1:mfhgrND6BH5AFjEXeqg
 github.com/shuldan/app v0.0.0-20260214215613-1dae55f6dd83/go.mod h1:Z8xajNVqGxXvJofdCBj8mQl8Gv1xbqXn6bLjJ1kFS8M=
 github.com/shuldan/cli v0.0.0-20260214231904-4ae249b58bb9 h1:22/iRqA40/KjxUI+cSJ7EVRL1/gh71BonDEMaSrDARk=
 github.com/shuldan/cli v0.0.0-20260214231904-4ae249b58bb9/go.mod h1:O1XVmsh0k5c9Uef4qlN6tvjl+QTUPiEYV/Sy9SpLi4M=
+github.com/shuldan/commands v0.0.0-20260314100633-c611d200ec4b h1:gEGw/y2V5RqUzgn3IYRbPfqv2QKpuUgA9jAj8BIsVaE=
+github.com/shuldan/commands v0.0.0-20260314100633-c611d200ec4b/go.mod h1:mArlOB3jHvK12JNjmeXQ2vAIIGjsHdHlYH7ZtIlXeOA=
 github.com/shuldan/config v0.0.0-20260214155131-90ce2e532553 h1:dXGfpSnhwmtJGFRhbnM4rCzZ9xPKF62t+4yPLYKELhQ=
 github.com/shuldan/config v0.0.0-20260214155131-90ce2e532553/go.mod h1:eH1IrgmlVenEI2/kstnIIB/Qdy8qGO3bIMDKwTafXQ0=
 github.com/shuldan/errors v0.0.0-20260214210805-dde5519ee490 h1:0KBcthjxP3y0CUAU8aUxHx9Fh9MaiM7F/3I3Vb7g4WE=

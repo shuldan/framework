@@ -8,9 +8,6 @@ import (
 func TestConfig_WithDefaults_AllZero(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}.withDefaults()
-	if cfg.Port != 8080 {
-		t.Errorf("expected port 8080, got %d", cfg.Port)
-	}
 	if cfg.ReadTimeout != 15*time.Second {
 		t.Errorf("expected 15s read timeout, got %v", cfg.ReadTimeout)
 	}

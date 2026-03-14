@@ -11,10 +11,6 @@ type Config struct {
 }
 
 func (c Config) withDefaults() Config {
-	if c.Port == 0 {
-		c.Port = 8080
-	}
-
 	if c.ReadTimeout == 0 {
 		c.ReadTimeout = 15 * time.Second
 	}
