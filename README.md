@@ -21,9 +21,8 @@
 - **Компоненты опциональны** — API Gateway без БД, Worker без HTTP
 - **HTTP-сервер** — обёртка Go 1.22+ `ServeMux` с middleware, группами, error-хелперами
 - **Множество БД** — именованные подключения с отдельными пулами и миграциями
-- **Event ↔ Queue Bridge** — двусторонняя пересылка событий между сервисами через очередь
-- **Command Bus** — межсервисная командная шина с идемпотентностью, таймаутами и ответами
-- **Стандартный Envelope** — единый формат межсервисных сообщений с поддержкой трассировки
+- **EventBus** — доменная шина событий с async/sync режимами, middleware, retry, ordered delivery
+- **Command Bus** — командная шина с client/server, типизированными handler-ами, Future/TypedFuture и pluggable transport
 - **Structured logging** — единый `slog`-логгер для всех компонентов
 - **Domain errors → HTTP** — автоматический маппинг `errors.Kind` в HTTP-статус и JSON
 
@@ -99,17 +98,22 @@ type Logger interface {
   - [Domain Errors → HTTP](#domain-errors--http)
 - [Database Manager](#database-manager)
 - [EventBus](#eventbus)
-- [Event ↔ Queue Bridge](#event--queue-bridge)
-  - [Envelope](#envelope)
-  - [OutboundRelay](#outboundrelay-события--очередь)
-  - [InboundRelay](#inboundrelay-очередь--события)
-  - [Межсервисная коммуникация](#межсервисная-коммуникация)
+  - [Dispatcher](#dispatcher)
+  - [Подписка на события](#подписка-на-события)
+  - [Middleware событий](#middleware-событий)
+  - [Retry и Timeout](#retry-и-timeout)
+  - [Ordered Delivery](#ordered-delivery)
+  - [Transport](#event-transport)
 - [Command Bus](#command-bus)
-  - [CommandEnvelope / ResultEnvelope](#commandenvelope--resultenvelope)
-  - [CommandSender (команды → очередь)](#commandsender-команды--очередь)
-  - [CommandReceiver (очередь → выполнение)](#commandreceiver-очередь--выполнение)
-  - [ReplyListener (ответы → callback)](#replylistener-ответы--callback)
-  - [Межсервисная командная коммуникация](#межсервисная-командная-коммуникация)
+  - [Transport](#command-transport)
+  - [Codec](#command-codec)
+  - [Command и Result](#command-и-result)
+  - [CommandServer](#commandserver)
+  - [CommandClient](#commandclient)
+  - [Future и TypedFuture](#future-и-typedfuture)
+  - [ReplySender и отложенные ответы](#replysender-и-отложенные-ответы)
+  - [Ошибки командной шины](#ошибки-командной-шины)
+  - [Commandbus Module (lifecycle)](#commandbus-module-lifecycle)
 - [Queue Worker](#queue-worker)
 - [Migration Runner](#migration-runner)
 - [CLI-команды](#cli-команды)
@@ -135,7 +139,6 @@ import (
     "time"
 
     "github.com/shuldan/cli"
-    "github.com/shuldan/config"
 
     "github.com/shuldan/framework"
     "github.com/shuldan/framework/command"
@@ -603,672 +606,724 @@ database:
 
 ## EventBus
 
-Обёртка над `events.Dispatcher` как `app.Module`.
+Обёртка над `events.Dispatcher` как `app.Module`. Dispatcher создаётся из пакета `shuldan/events` с нужными опциями и передаётся в модуль.
+
+### Dispatcher
 
 ```go
-bus := eventbus.NewModule(eventbus.Config{
-    Async:      true,
-    Workers:    8,
-    BufferSize: 256,
-    Ordered:    false,
-})
+import (
+    "github.com/shuldan/events"
+    "github.com/shuldan/framework/eventbus"
+)
+
+// Создание диспетчера с нужными опциями
+dispatcher := events.New(
+    events.WithAsyncMode(),
+    events.WithWorkerPool(8),
+    events.WithErrorHandler(func(ctx context.Context, event events.Event, err error) {
+        log.Error("event handler failed", "error", err)
+    }),
+    events.WithMiddleware(
+        middleware.NewRecovery(),
+        middleware.NewLogging(log),
+    ),
+)
+
+// Обёртка в app.Module для lifecycle-управления
+bus := eventbus.NewModule(dispatcher)
 
 // Получение диспетчера для DDD-модулей
-dispatcher := bus.Dispatcher()
+d := bus.Dispatcher()
 ```
 
-DDD-модуль подписывается на события:
+`eventbus.Module` реализует `app.Module`:
+- `Init()` — no-op
+- `Start()` — no-op
+- `Stop(ctx)` — вызывает `dispatcher.Close(ctx)`, дожидается завершения in-flight обработчиков
+
+### Подписка на события
+
+Типизированная подписка через generic-функцию `events.Subscribe[E]()`:
 
 ```go
-func (m *OrderModule) Listeners(d *events.Dispatcher) {
-    events.SubscribeFunc(d, func(ctx context.Context, e *PaymentReceived) error {
-        return m.interactor.ConfirmOrder(ctx, e.OrderID)
-    })
+import "github.com/shuldan/events"
+
+// Доменное событие — любой тип
+type OrderCreated struct {
+    OrderID    string
+    CustomerID string
+    Total      int
+}
+
+// Обработчик реализует events.Handler[E]
+type OrderCreatedHandler struct {
+    service *PaymentService
+}
+
+func (h *OrderCreatedHandler) Handle(ctx context.Context, e *OrderCreated) error {
+    return h.service.CreateInvoice(ctx, e.OrderID, e.Total)
+}
+
+// Подписка
+sub := events.Subscribe[*OrderCreated](dispatcher, &OrderCreatedHandler{
+    service: paymentService,
+})
+
+// Отписка
+sub.Unsubscribe()
+```
+
+Публикация событий:
+
+```go
+// Одно событие
+err := dispatcher.Publish(ctx, &OrderCreated{
+    OrderID:    "order-123",
+    CustomerID: "cust-456",
+    Total:      1500,
+})
+
+// Несколько событий
+err := dispatcher.PublishAll(ctx,
+    &OrderCreated{OrderID: "order-123"},
+    &InventoryReserved{OrderID: "order-123"},
+)
+```
+
+### Middleware событий
+
+Система middleware для цепочки обработки событий. Middleware оборачивают `events.Next` и могут добавлять логику до/после обработчика.
+
+```go
+import "github.com/shuldan/events/middleware"
+
+// Recovery — перехват паник в обработчиках
+recovery := middleware.NewRecovery()
+
+// Logging — логирование обработки
+logging := middleware.NewLogging(log)
+
+// Metrics — запись метрик (duration, errors)
+recorder := middleware.NewInMemoryRecorder()
+metrics := middleware.NewMetrics(recorder)
+
+// Глобальный middleware — применяется ко всем подписчикам
+dispatcher := events.New(
+    events.WithMiddleware(recovery, logging, metrics),
+)
+
+// Per-subscriber middleware — только для конкретной подписки
+events.Subscribe[*OrderCreated](dispatcher, handler,
+    events.WithSubscribeMiddleware(customMiddleware),
+)
+```
+
+Порядок выполнения: `global middleware → per-subscriber middleware → retry → timeout → handler`.
+
+**Собственный middleware:**
+
+```go
+type auditMiddleware struct{}
+
+func (m *auditMiddleware) Wrap(next events.Next) events.Next {
+    return &auditNext{next: next}
+}
+
+type auditNext struct {
+    next events.Next
+}
+
+func (n *auditNext) Handle(ctx context.Context, event events.Event) error {
+    // До обработки
+    log.Info("processing event", "type", fmt.Sprintf("%T", event))
+
+    err := n.next.Handle(ctx, event)
+
+    // После обработки
+    if err != nil {
+        log.Error("event failed", "error", err)
+    }
+    return err
 }
 ```
 
-### Конфигурация
+### Retry и Timeout
 
-```yaml
-events:
-  async: true
-  workers: 8
-  buffer_size: 256
-  ordered: false    # true — события одного агрегата последовательно
+Настраиваются per-subscriber через `SubscribeOption`:
+
+```go
+// Retry с exponential backoff
+events.Subscribe[*PaymentFailed](dispatcher, handler,
+    events.WithRetry(events.RetryPolicy{
+        MaxRetries:   3,
+        InitialDelay: 100 * time.Millisecond,
+        MaxDelay:     5 * time.Second,
+        Multiplier:   2.0,
+    }),
+)
+
+// Timeout на обработку
+events.Subscribe[*OrderCreated](dispatcher, handler,
+    events.WithTimeout(10 * time.Second),
+)
+
+// Комбинация: таймаут охватывает все retry-попытки
+events.Subscribe[*OrderCreated](dispatcher, handler,
+    events.WithTimeout(30 * time.Second),
+    events.WithRetry(events.RetryPolicy{
+        MaxRetries:   3,
+        InitialDelay: 1 * time.Second,
+        Multiplier:   2.0,
+    }),
+)
 ```
 
----
+Дефолтные опции для всех подписчиков:
 
-## Event ↔ Queue Bridge
-
-Двусторонний мост между внутренними доменными событиями и межсервисной очередью. Состоит из трёх компонентов:
-
-```
-Service A                              Queue                          Service B
-┌─────────────┐                                                  ┌─────────────┐
-│ Dispatcher  │──→ OutboundRelay ──→ [topic] ──→ InboundRelay ──→│ Dispatcher  │
-│             │←── InboundRelay  ←── [topic] ←── OutboundRelay ←──│             │
-└─────────────┘                                                  └─────────────┘
-                          ↕ Envelope format ↕
+```go
+dispatcher := events.New(
+    events.WithDefaultSubscribeOptions(
+        events.WithRetry(events.RetryPolicy{MaxRetries: 2, InitialDelay: 100 * time.Millisecond, Multiplier: 2.0}),
+        events.WithTimeout(15 * time.Second),
+    ),
+)
 ```
 
-### Envelope
+### Ordered Delivery
 
-Стандартный формат межсервисного события. Все события, проходящие через `OutboundRelay`, оборачиваются в Envelope.
+События с одинаковым ключом обрабатываются последовательно (в async-режиме). Событие должно реализовать интерфейс `events.KeyedEvent`:
+
+```go
+type OrderStatusChanged struct {
+    OrderID string
+    Status  string
+}
+
+// KeyedEvent — события одного заказа обрабатываются последовательно
+func (e *OrderStatusChanged) EventKey() string {
+    return e.OrderID
+}
+```
+
+В async-режиме для каждого уникального ключа создаётся отдельная очередь. События без ключа обрабатываются пулом воркеров без гарантий порядка.
+
+### Event Transport
+
+`events.Transport` — абстракция для передачи событий через внешний брокер. Подключается к Dispatcher для двусторонней пересылки.
+
+```go
+import (
+    "github.com/shuldan/events"
+    "github.com/shuldan/events/codec"
+    memtransport "github.com/shuldan/events/transport/memory"
+)
+
+transport := memtransport.New()
+jsonCodec := codec.NewJSON()
+
+dispatcher := events.New(
+    events.WithTransport(transport),
+    events.WithCodec(jsonCodec),
+    events.WithAsyncMode(),
+)
+```
+
+**Интерфейс Transport:**
+
+```go
+type Transport interface {
+    Publish(ctx context.Context, envelope Envelope) error
+    Subscribe(ctx context.Context, handler TransportHandler) error
+    Close(ctx context.Context) error
+}
+```
+
+**Envelope — обёртка события для транспорта:**
 
 ```go
 type Envelope struct {
-    EventName   string          `json:"event_name"`
-    AggregateID string          `json:"aggregate_id"`
-    OccurredAt  time.Time       `json:"occurred_at"`
-    Source      string          `json:"source,omitempty"`
-    Payload     json.RawMessage `json:"payload"`
-
-    // Зарезервированы для трассировки
-    CorrelationID string `json:"correlation_id,omitempty"`
-    CausationID   string `json:"causation_id,omitempty"`
-    SchemaVersion string `json:"schema_version,omitempty"`
+    ID          string
+    Type        string            // reflect.TypeOf(event).String()
+    Key         string            // EventKey() если реализован
+    Payload     []byte            // сериализованное событие
+    ContentType string            // "application/json"
+    Metadata    map[string]string
+    Timestamp   time.Time
 }
 ```
 
-Пример JSON в очереди:
+**Codec — сериализация событий:**
 
-```json
-{
-  "event_name": "OrderCreated",
-  "aggregate_id": "order-123",
-  "occurred_at": "2025-01-15T10:30:00Z",
-  "source": "order-service",
-  "payload": {
-    "order_id": "order-123",
-    "customer_id": "cust-456",
-    "total": 1500
-  }
+```go
+type Codec interface {
+    Encode(event Event) ([]byte, error)
+    Decode(data []byte, target Event) error
+    ContentType() string
 }
 ```
 
-| Поле | Описание |
-|------|----------|
-| `event_name` | Имя доменного события |
-| `aggregate_id` | ID агрегата-источника |
-| `occurred_at` | Время возникновения события |
-| `source` | Имя сервиса-отправителя (для фильтрации собственных событий) |
-| `payload` | Сериализованное доменное событие |
-| `correlation_id` | ID цепочки запросов (для трассировки) |
-| `causation_id` | ID события-причины |
-| `schema_version` | Версия схемы payload |
-
-### OutboundRelay (события → очередь)
-
-Выборочная пересылка доменных событий в очередь.
-
-```go
-outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
-    eventbus.WithSource("order-service"),  // записывается в envelope.source
-)
-defer outbound.Unsubscribe()  // отписка от диспетчера
-
-// DDD-модуль регистрирует пересылку
-func (m *OrderModule) Relays(outbound *eventbus.OutboundRelay) {
-    // Все OrderCreated → в очередь (оборачиваются в Envelope)
-    outbound.Forward("OrderCreated", "order.created")
-
-    // OrderCancelled → только если сумма > 1000
-    outbound.Forward("OrderCancelled", "order.cancelled",
-        eventbus.WithFilter(func(e events.Event) bool {
-            oc, ok := e.(*OrderCancelled)
-            return ok && oc.Amount > 1000
-        }),
-    )
-
-    // Кастомная сериализация (Envelope НЕ используется)
-    outbound.Forward("OrderShipped", "order.shipped",
-        eventbus.WithTransform(func(e events.Event) ([]byte, error) {
-            return json.Marshal(map[string]string{
-                "order_id": e.AggregateID(),
-                "event":    e.EventName(),
-            })
-        }),
-    )
-}
-```
-
-| Опция (создание) | Тип | Описание |
-|-------------------|-----|----------|
-| `WithSource(service)` | `OutboundConfig` | Имя сервиса-источника, записывается в `envelope.source` |
-
-| Опция (маршрут) | Тип | Описание |
-|------------------|-----|----------|
-| `WithFilter(fn)` | `OutboundOption` | Фильтрация по содержимому события |
-| `WithTransform(fn)` | `OutboundOption` | Кастомная сериализация (обходит Envelope) |
-
-**Как работает:** `OutboundRelay` подписывается на `Dispatcher` через `SubscribeAll`. При получении события проверяет регистрацию по имени, применяет фильтр, оборачивает в Envelope (или вызывает transform), отправляет через `broker.Produce(topic, data)`.
-
-### InboundRelay (очередь → события)
-
-Приём событий из очереди и публикация в локальный Dispatcher.
-
-```go
-inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
-    eventbus.WithServiceName("payment-service"),  // фильтрация собственных событий
-)
-
-// DDD-модуль регистрирует десериализаторы
-func (m *PaymentModule) InboundRelays(inbound *eventbus.InboundRelay) {
-    // Из топика "order.created" события "OrderCreated" → десериализация → Dispatcher
-    inbound.On("order.created", "OrderCreated",
-        func(payload []byte, env *eventbus.Envelope) (events.Event, error) {
-            var data struct {
-                OrderID    string `json:"order_id"`
-                CustomerID string `json:"customer_id"`
-                Total      int    `json:"total"`
-            }
-            if err := json.Unmarshal(payload, &data); err != nil {
-                return nil, err
-            }
-            return &OrderCreatedExternal{
-                BaseEvent:  events.NewBaseEvent("OrderCreated", data.OrderID),
-                CustomerID: data.CustomerID,
-                Total:      data.Total,
-            }, nil
-        },
-    )
-}
-```
-
-**Регистрация в Queue Worker:**
-
-`RunTopic()` возвращает функцию, совместимую с `queueworker.Registration.Run`:
-
-```go
-func (m *PaymentModule) Consumers(qw *queueworker.Module, inbound *eventbus.InboundRelay) {
-    // Для каждого топика — отдельный consumer
-    for _, topic := range inbound.Topics() {
-        qw.Register(queueworker.Registration{
-            Name: "inbound-" + topic,
-            Run:  inbound.RunTopic(topic),
-        })
-    }
-}
-```
-
-| Опция | Тип | Описание |
-|-------|-----|----------|
-| `WithServiceName(name)` | `InboundOption` | Фильтрация собственных событий по `envelope.source` |
-
-**Как работает:** `InboundRelay` вызывает `broker.Consume(topic, handler)`. Каждое сообщение десериализуется из Envelope, по `event_name` находится зарегистрированный `Deserializer`, payload превращается в доменное событие, которое публикуется в локальный `Dispatcher`.
-
-**Защита от циклов:** если `WithServiceName("my-service")` задан и `envelope.source == "my-service"` — событие пропускается.
-
-### Множество событий в одном топике
-
-`InboundRelay` поддерживает несколько типов событий на одном топике:
-
-```go
-inbound.On("order.events", "OrderCreated", orderCreatedDeserializer)
-inbound.On("order.events", "OrderCancelled", orderCancelledDeserializer)
-inbound.On("order.events", "OrderShipped", orderShippedDeserializer)
-
-// Один consumer на весь топик
-qw.Register(queueworker.Registration{
-    Name: "inbound-order-events",
-    Run:  inbound.RunTopic("order.events"),
-})
-```
-
-### Межсервисная коммуникация
-
-Полный цикл: Order Service публикует `OrderCreated` → Payment Service получает и обрабатывает.
-
-**Order Service (отправитель):**
-
-```go
-// bootstrap
-bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
-outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
-    eventbus.WithSource("order-service"),
-)
-outbound.Forward("OrderCreated", "order.created")
-
-// domain — публикация события
-dispatcher.Publish(ctx, &OrderCreated{
-    BaseEvent:  events.NewBaseEvent("OrderCreated", orderID),
-    CustomerID: customerID,
-    Total:      total,
-})
-// → автоматически: Envelope → broker.Produce("order.created", data)
-```
-
-**Payment Service (получатель):**
-
-```go
-// bootstrap
-bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
-inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
-    eventbus.WithServiceName("payment-service"),
-)
-
-// регистрация десериализатора
-inbound.On("order.created", "OrderCreated", deserializeOrderCreated)
-
-// подписка на локальное событие
-events.SubscribeFunc(bus.Dispatcher(), func(ctx context.Context, e *OrderCreatedExternal) error {
-    return paymentService.CreateInvoice(ctx, e.OrderID, e.Total)
-})
-
-// регистрация consumer
-qw.Register(queueworker.Registration{
-    Name: "inbound-order-created",
-    Run:  inbound.RunTopic("order.created"),
-})
-```
+При публикации события Dispatcher автоматически сериализует его и отправляет через Transport. При получении из Transport — десериализует и публикует в локальный Dispatcher.
 
 ---
 
 ## Command Bus
 
-Межсервисная командная шина для request/reply взаимодействия через очередь. В отличие от событий (fire-and-forget), команды подразумевают целевой сервис-получатель и опциональный ответ с результатом.
-
-### Отличие от EventBus
-
-| | EventBus | Command Bus |
-|---|----------|-------------|
-| **Семантика** | Уведомление о случившемся | Запрос на выполнение действия |
-| **Получатели** | Много (pub/sub) | Один (point-to-point) |
-| **Ответ** | Нет | Опциональный (reply) |
-| **Идемпотентность** | На стороне подписчика | Встроенная (`IdempotencyStore`) |
-| **Таймауты** | Нет | Встроенные |
+Командная шина для request/reply взаимодействия. Состоит из `CommandClient` (отправка команд, получение ответов через Future) и `CommandServer` (приём команд, выполнение обработчиков, отправка ответов). Взаимодействие происходит через абстракцию `Transport`.
 
 ```
-Order Service                          Queue                       Payment Service
-┌─────────────┐                                                  ┌─────────────────┐
-│ CommandSender│──→ [commands.CreatePayment] ──→ CommandReceiver ──→│ handler(cmd)   │
-│             │                                                  │                 │
-│ ReplyListener│←── [replies.order-service]  ←── sendResult ←─────│ result/error   │
-└─────────────┘                                                  └─────────────────┘
-                      ↕ CommandEnvelope / ResultEnvelope ↕
+CommandClient                    Transport                    CommandServer
+┌─────────────┐                                             ┌───────────────────┐
+│ Send(cmd)   │──→ CommandEnvelope ──→ Subscribe handler ──→│ Handler[C].Handle │
+│             │                                             │                   │
+│ Future.Await│←── ReplyEnvelope  ←── SubscribeReplies   ←──│ ReplySender.Send  │
+└─────────────┘                                             └───────────────────┘
 ```
 
-### Компоненты
+### Command Transport
 
-| Компонент | Назначение |
-|-----------|------------|
-| `commandbus.Module` | Lifecycle-модуль для локального диспетчера команд (`app.Module`) |
-| `commandbus.CommandSender` | Отправка команд в очередь через `CommandEnvelope` |
-| `commandbus.CommandReceiver` | Приём команд из очереди, идемпотентность, выполнение, ответ |
-| `commandbus.ReplyListener` | Приём ответов (`ResultEnvelope`) и маршрутизация к callback-ам |
-
-### CommandEnvelope / ResultEnvelope
-
-**CommandEnvelope** — конверт команды для межсервисной доставки:
+Абстракция над брокером сообщений. Разделяет отправку команд и доставку ответов.
 
 ```go
-type CommandEnvelope struct {
-    IdempotencyKey string            `json:"idempotency_key"`
-    CommandName    string            `json:"command_name"`
-    ReplyTo        string            `json:"reply_to,omitempty"`
-    CorrelationID  string            `json:"correlation_id"`
-    Sender         string            `json:"sender,omitempty"`
-    CreatedAt      time.Time         `json:"created_at"`
-    Timeout        time.Duration     `json:"timeout"`
-    Payload        json.RawMessage   `json:"payload"`
-    SchemaVersion  string            `json:"schema_version,omitempty"`
-    Headers        map[string]string `json:"headers,omitempty"`
+type Transport interface {
+    Send(ctx context.Context, env CommandEnvelope) error
+    Subscribe(ctx context.Context, handler CommandHandler) error
+    Reply(ctx context.Context, env ReplyEnvelope) error
+    SubscribeReplies(ctx context.Context, handler ReplyHandler) error
+    ReplyAddress() string
+    Close(ctx context.Context) error
 }
 ```
 
-**ResultEnvelope** — конверт результата выполнения команды:
+**In-memory transport** (для тестов и single-process):
 
 ```go
-type ResultEnvelope struct {
-    CorrelationID string            `json:"correlation_id"`
-    CommandName   string            `json:"command_name"`
-    ResultName    string            `json:"result_name,omitempty"`
-    Sender        string            `json:"sender,omitempty"`
-    CreatedAt     time.Time         `json:"created_at"`
-    Payload       json.RawMessage   `json:"payload,omitempty"`
-    Error         *string           `json:"error"`
-    SchemaVersion string            `json:"schema_version,omitempty"`
-    Headers       map[string]string `json:"headers,omitempty"`
+import memtransport "github.com/shuldan/commands/transport/memory"
+
+transport := memtransport.New()
+// transport.ReplyAddress() == "memory://reply"
+```
+
+### Command Codec
+
+Сериализация/десериализация команд и результатов:
+
+```go
+type Codec interface {
+    Encode(v any) ([]byte, error)
+    Decode(data []byte, v any) error
 }
 ```
 
-Пример `CommandEnvelope` в очереди:
+**JSON codec:**
 
-```json
-{
-  "idempotency_key": "pay-order-123-attempt-1",
-  "command_name": "CreatePayment",
-  "reply_to": "order-service",
-  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "sender": "order-service",
-  "created_at": "2025-01-15T10:30:00Z",
-  "timeout": 30000000000,
-  "payload": {
-    "order_id": "order-123",
-    "amount": 1500,
-    "currency": "RUB"
-  }
+```go
+import jsoncodec "github.com/shuldan/commands/codec/json"
+
+codec := jsoncodec.New()
+```
+
+### Command и Result
+
+Команды и результаты — интерфейсы с маркерным методом:
+
+```go
+// Команда
+type Command interface {
+    CommandName() string
+}
+
+// Результат
+type Result interface {
+    ResultName() string
 }
 ```
 
-Пример `ResultEnvelope`:
+**Пример:**
 
-```json
-{
-  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "command_name": "CreatePayment",
-  "result_name": "PaymentCreated",
-  "created_at": "2025-01-15T10:30:01Z",
-  "payload": {
-    "payment_id": "pay-789",
-    "status": "pending"
-  },
-  "error": null
+```go
+type CreatePayment struct {
+    OrderID  string `json:"order_id"`
+    Amount   int    `json:"amount"`
+    Currency string `json:"currency"`
 }
+
+func (c *CreatePayment) CommandName() string { return "CreatePayment" }
+
+type PaymentCreated struct {
+    PaymentID string `json:"payment_id"`
+    Status    string `json:"status"`
+}
+
+func (r *PaymentCreated) ResultName() string { return "PaymentCreated" }
 ```
 
-| Поле (CommandEnvelope) | Описание |
-|------------------------|----------|
-| `idempotency_key` | Ключ идемпотентности (из команды или UUID) |
-| `command_name` | Имя команды для маршрутизации |
-| `reply_to` | Имя сервиса для ответа (топик `replies.<reply_to>`) |
-| `correlation_id` | ID для сквозной трассировки |
-| `sender` | Имя сервиса-отправителя |
-| `created_at` | Время создания |
-| `timeout` | TTL команды — receiver отклоняет просроченные |
-| `payload` | Сериализованная команда |
-| `headers` | Произвольные заголовки |
+### CommandServer
 
-| Поле (ResultEnvelope) | Описание |
-|-----------------------|----------|
-| `correlation_id` | Совпадает с командой для сопоставления |
-| `command_name` | Имя исходной команды |
-| `result_name` | Имя результата (тип) |
-| `payload` | Сериализованный результат (nil при ошибке) |
-| `error` | Строка ошибки (nil при успехе) |
-
-### Module (локальный диспетчер)
-
-`commandbus.Module` — lifecycle-обёртка над `commands.Dispatcher` для локальной обработки команд внутри одного сервиса:
+Принимает команды через Transport, маршрутизирует к типизированным обработчикам, отправляет ответы.
 
 ```go
-cmdBus := commandbus.NewModule(commandbus.Config{
-    Async:      true,
-    Workers:    4,
-    BufferSize: 128,
-    Ordered:    false,
-})
+import "github.com/shuldan/commands"
 
-// Локальный диспетчер — для команд внутри одного сервиса
-dispatcher := cmdBus.Dispatcher()
-```
-
-### Конфигурация
-
-```yaml
-commands:
-  async: true
-  workers: 4
-  buffer_size: 128
-  ordered: false
-```
-
-### CommandSender (команды → очередь)
-
-Отправка команд в удалённый сервис через очередь. Каждая команда оборачивается в `CommandEnvelope` и отправляется в топик `commands.<command_name>`.
-
-```go
-sender := commandbus.NewCommandSender(broker, log,
-    commandbus.WithSender("order-service"),           // sender в envelope
-    commandbus.WithReplyTo("order-service"),           // куда слать ответ
-    commandbus.WithDefaultTimeout(30 * time.Second),   // таймаут по умолчанию
+server, err := commands.NewCommandServer(transport, codec,
+    commands.WithServerLogger(log),
 )
+```
 
-// Регистрация маршрутов
-sender.Forward("CreatePayment")
-sender.Forward("CancelPayment")
+**Регистрация обработчиков** — типобезопасная через generic-функцию `commands.Register[C]()`:
 
-// Отправка команды
-err := sender.Send(ctx, &CreatePayment{
+```go
+// Обработчик реализует commands.Handler[C]
+type CreatePaymentHandler struct {
+    service *PaymentService
+}
+
+func (h *CreatePaymentHandler) Handle(
+    ctx context.Context,
+    cmd *CreatePayment,
+    reply commands.ReplySender,
+) error {
+    payment, err := h.service.Create(ctx, cmd.OrderID, cmd.Amount)
+    if err != nil {
+        // Отправка ошибки клиенту
+        return reply.SendError(ctx, err)
+    }
+
+    // Отправка результата клиенту
+    return reply.Send(ctx, &PaymentCreated{
+        PaymentID: payment.ID,
+        Status:    payment.Status,
+    })
+}
+
+// Регистрация (до Open)
+err := commands.Register[*CreatePayment](server, &CreatePaymentHandler{
+    service: paymentService,
+})
+```
+
+Ограничения:
+- Регистрация обработчиков только **до** вызова `Open()`
+- Один обработчик на одно имя команды
+- При дублировании — `ErrAlreadyRegistered`
+
+**Lifecycle:**
+
+```go
+// Подписка на Transport (начинает приём команд)
+err := server.Open(ctx)
+
+// Закрытие: ожидание in-flight обработчиков, закрытие transport
+err := server.Close(ctx)
+```
+
+Каждая команда обрабатывается в отдельной горутине. `Close()` дожидается завершения всех in-flight обработчиков.
+
+### CommandClient
+
+Отправляет команды через Transport и получает ответы через Future.
+
+```go
+client, err := commands.NewCommandClient(transport, codec,
+    commands.WithTimeout(30 * time.Second),       // дефолтный таймаут
+    commands.WithClientLogger(log),
+)
+```
+
+**Отправка команды (нетипизированная):**
+
+```go
+future, err := client.Send(ctx, &CreatePayment{
     OrderID:  "order-123",
     Amount:   1500,
     Currency: "RUB",
 })
-// → CommandEnvelope → broker.Produce("commands.CreatePayment", data)
-
-// С переопределением опций
-err := sender.Send(ctx, &CancelPayment{OrderID: "order-123"},
-    commandbus.WithTimeout(5 * time.Second),   // короткий таймаут
-    commandbus.WithoutReply(),                  // fire-and-forget
-    commandbus.WithHeaders(map[string]string{
-        "priority": "high",
-    }),
-)
-```
-
-| Опция (создание) | Описание |
-|-------------------|----------|
-| `WithSender(name)` | Имя сервиса-отправителя |
-| `WithReplyTo(name)` | Имя сервиса для получения ответов (топик `replies.<name>`) |
-| `WithDefaultTimeout(d)` | Таймаут по умолчанию для всех команд |
-
-| Опция (отправка) | Описание |
-|-------------------|----------|
-| `WithTimeout(d)` | Переопределение таймаута для конкретной команды |
-| `WithoutReply()` | Отключение ответа (fire-and-forget) |
-| `WithHeaders(h)` | Произвольные заголовки |
-
-### CommandReceiver (очередь → выполнение)
-
-Приём команд из очереди, проверка идемпотентности и таймаутов, выполнение и отправка результата.
-
-```go
-receiver := commandbus.NewCommandReceiver(broker, log,
-    commandbus.WithIdempotencyStore(redisIdemStore),   // или memory (по умолчанию)
-    commandbus.WithIdempotencyTTL(24 * time.Hour),     // TTL ключей
-)
-
-// Регистрация обработчика
-err := receiver.Handle(
-    "CreatePayment",                    // имя команды
-    deserializeCreatePayment,           // десериализатор
-    handleCreatePayment,                // обработчик
-    commandbus.WithCommandIdempotencyTTL(1 * time.Hour),  // TTL для этой команды
-)
-
-// Десериализатор
-func deserializeCreatePayment(
-    payload []byte, env *commandbus.CommandEnvelope,
-) (commands.Command, error) {
-    var cmd CreatePayment
-    if err := json.Unmarshal(payload, &cmd); err != nil {
-        return nil, err
-    }
-    return &cmd, nil
+if err != nil {
+    return err
 }
 
-// Обработчик
-func handleCreatePayment(
-    ctx context.Context, cmd commands.Command,
-) (commands.Result, error) {
-    c := cmd.(*CreatePayment)
-    payment, err := paymentService.Create(ctx, c.OrderID, c.Amount)
-    if err != nil {
-        return nil, err  // → ошибка в ResultEnvelope + redelivery
-    }
-    return &PaymentCreated{PaymentID: payment.ID, Status: payment.Status}, nil
-}
+// Ожидание результата
+result, err := future.Await(ctx)
 ```
 
-**Регистрация в Queue Worker:**
-
-`Registrations()` возвращает готовые регистрации для `queueworker.Module`:
+**Типизированная отправка** — generic-функция `commands.Send[R]()`:
 
 ```go
-func (m *PaymentModule) Consumers(qw *queueworker.Module) {
-    for _, reg := range m.receiver.Registrations() {
-        qw.Register(reg)
-    }
-}
-```
-
-| Опция (создание) | Описание |
-|-------------------|----------|
-| `WithIdempotencyStore(store)` | Хранилище идемпотентности (default: in-memory) |
-| `WithIdempotencyTTL(ttl)` | Глобальный TTL для ключей (default: 24h) |
-
-| Опция (обработчик) | Описание |
-|---------------------|----------|
-| `WithCommandIdempotencyTTL(ttl)` | TTL для конкретной команды |
-
-**Поведение:**
-
-1. Сообщение из очереди десериализуется в `CommandEnvelope`
-2. Проверка таймаута: если `created_at + timeout < now` — команда отклоняется, ответ с ошибкой
-3. Проверка идемпотентности: если ключ уже обработан — пропуск (без ответа)
-4. Десериализация payload → вызов обработчика
-5. При успехе — ключ помечается в `IdempotencyStore`, результат отправляется в `replies.<reply_to>`
-6. При ошибке обработчика — ответ с ошибкой + возврат ошибки (очередь не ACK-ает, redelivery)
-
-### ReplyListener (ответы → callback)
-
-Слушает топик ответов и маршрутизирует `ResultEnvelope` к зарегистрированным callback-ам.
-
-```go
-replyListener := commandbus.NewReplyListener(broker, log,
-    commandbus.WithListenerServiceName("order-service"),  // топик: replies.order-service
-)
-
-// Регистрация обработчика ответов
-replyListener.OnResult(
-    "CreatePayment",                      // имя команды
-    deserializePaymentCreated,            // десериализатор результата
-    func(ctx context.Context, result commands.Result, err error) error {
-        if err != nil {
-            // Команда завершилась с ошибкой на стороне получателя
-            log.Error("payment creation failed", "error", err)
-            return orderService.MarkPaymentFailed(ctx, correlationID)
-        }
-        r := result.(*PaymentCreated)
-        return orderService.AttachPayment(ctx, r.PaymentID)
-    },
-)
-
-// Десериализатор результата
-func deserializePaymentCreated(
-    payload []byte, env *commandbus.ResultEnvelope,
-) (commands.Result, error) {
-    var r PaymentCreated
-    if err := json.Unmarshal(payload, &r); err != nil {
-        return nil, err
-    }
-    return &r, nil
-}
-```
-
-**Регистрация в Queue Worker:**
-
-```go
-qw.Register(queueworker.Registration{
-    Name: "reply-listener",
-    Run:  replyListener.Run,
-})
-```
-
-| Опция | Описание |
-|-------|----------|
-| `WithListenerServiceName(name)` | Имя сервиса — определяет топик `replies.<name>` |
-
-### Межсервисная командная коммуникация
-
-Полный цикл: Order Service отправляет команду `CreatePayment` → Payment Service выполняет → Order Service получает результат.
-
-**Order Service (отправитель):**
-
-```go
-// bootstrap
-broker := redisBroker.New(redisClient)
-
-// Sender — отправка команд
-sender := commandbus.NewCommandSender(broker, log,
-    commandbus.WithSender("order-service"),
-    commandbus.WithReplyTo("order-service"),
-    commandbus.WithDefaultTimeout(30 * time.Second),
-)
-sender.Forward("CreatePayment")
-sender.Forward("CancelPayment")
-
-// ReplyListener — приём ответов
-replyListener := commandbus.NewReplyListener(broker, log,
-    commandbus.WithListenerServiceName("order-service"),
-)
-replyListener.OnResult("CreatePayment", deserializePaymentResult, handlePaymentResult)
-replyListener.OnResult("CancelPayment", deserializeCancelResult, handleCancelResult)
-
-// Queue Worker для ответов
-qw := queueworker.NewModule(log)
-qw.Register(queueworker.Registration{
-    Name: "reply-listener",
-    Run:  replyListener.Run,
-})
-
-// domain — отправка команды
-err := sender.Send(ctx, &CreatePayment{
-    OrderID:  orderID,
-    Amount:   total,
+future, err := commands.Send[*PaymentCreated](ctx, client, &CreatePayment{
+    OrderID:  "order-123",
+    Amount:   1500,
     Currency: "RUB",
-})
+},
+    commands.WithSendTimeout(5 * time.Second), // переопределение таймаута
+)
+if err != nil {
+    return err
+}
+
+// Типобезопасный результат — *PaymentCreated, не Result
+payment, err := future.Await(ctx)
+if err != nil {
+    return err
+}
+fmt.Println(payment.PaymentID, payment.Status)
 ```
 
-**Payment Service (получатель):**
+**Lifecycle:**
 
 ```go
-// bootstrap
-broker := redisBroker.New(redisClient)
+// Подписка на ответы через Transport
+err := client.Open(ctx)
 
-// Receiver — приём и выполнение команд
-receiver := commandbus.NewCommandReceiver(broker, log,
-    commandbus.WithIdempotencyStore(commands.NewMemoryIdempotencyStore()),
-    commandbus.WithIdempotencyTTL(24 * time.Hour),
-)
+// Закрытие: все pending futures завершаются с ErrClientClosed
+err := client.Close(ctx)
+```
 
-receiver.Handle("CreatePayment", deserializeCreatePayment, func(
-    ctx context.Context, cmd commands.Command,
-) (commands.Result, error) {
-    c := cmd.(*CreatePayment)
-    payment, err := paymentService.Create(ctx, c.OrderID, c.Amount, c.Currency)
-    if err != nil {
-        return nil, err
-    }
-    return &PaymentCreated{PaymentID: payment.ID, Status: "pending"}, nil
-})
+### Future и TypedFuture
 
-// Queue Worker
-qw := queueworker.NewModule(log)
-for _, reg := range receiver.Registrations() {
-    qw.Register(reg)
+**Future** — результат отправки команды. Позволяет ожидать ответ синхронно или проверять готовность.
+
+```go
+type Future interface {
+    // Блокирует до получения результата или отмены контекста
+    Await(ctx context.Context) (Result, error)
+
+    // Канал, закрывается при получении результата
+    Done() <-chan struct{}
+
+    // Неблокирующая проверка; третий аргумент — готовность
+    Result() (Result, error, bool)
 }
 ```
 
-### Совместное использование EventBus и Command Bus
-
-События и команды решают разные задачи и отлично дополняют друг друга:
+**TypedFuture[R]** — типобезопасная версия, возвращается из `commands.Send[R]()`:
 
 ```go
-// Событие: "Заказ создан" — уведомление, 0+ подписчиков
-outbound.Forward("OrderCreated", "order.created")
+type TypedFuture[R Result] interface {
+    Await(ctx context.Context) (R, error)
+    Done() <-chan struct{}
+    Result() (R, error, bool)
+}
+```
 
-// Команда: "Создай платёж" — запрос к конкретному сервису, ожидание ответа
-sender.Forward("CreatePayment")
+**Поведение при таймауте:** если ответ не получен в течение заданного таймаута — Future завершается с `commands.ErrTimeout`.
 
-// В обработчике события OrderCreated → отправляем команду
-events.SubscribeFunc(bus.Dispatcher(), func(ctx context.Context, e *OrderCreated) error {
-    return sender.Send(ctx, &CreatePayment{
-        OrderID: e.OrderID,
-        Amount:  e.Total,
-    })
+**Поведение при закрытии клиента:** все pending futures завершаются с `commands.ErrClientClosed`.
+
+**Неблокирующая проверка:**
+
+```go
+future, _ := client.Send(ctx, cmd)
+
+// Продолжаем работу...
+doOtherWork()
+
+// Проверяем результат без блокировки
+if result, err, ok := future.Result(); ok {
+    // Результат готов
+    handleResult(result, err)
+} else {
+    // Ещё не готов — ждём
+    result, err := future.Await(ctx)
+    handleResult(result, err)
+}
+```
+
+**Ожидание через канал:**
+
+```go
+select {
+case <-future.Done():
+    result, err, _ := future.Result()
+    // ...
+case <-time.After(5 * time.Second):
+    // fallback
+}
+```
+
+### ReplySender и отложенные ответы
+
+`ReplySender` — интерфейс для отправки ответов из обработчика команды:
+
+```go
+type ReplySender interface {
+    Send(ctx context.Context, result Result) error
+    SendError(ctx context.Context, err error) error
+    Address() ReplyAddress
+}
+```
+
+**Немедленный ответ** (внутри обработчика):
+
+```go
+func (h *Handler) Handle(ctx context.Context, cmd *MyCommand, reply commands.ReplySender) error {
+    result, err := h.service.Do(ctx, cmd)
+    if err != nil {
+        return reply.SendError(ctx, err)
+    }
+    return reply.Send(ctx, result)
+}
+```
+
+**Отложенный ответ** — сохранение `ReplyAddress` и отправка позже:
+
+```go
+func (h *Handler) Handle(ctx context.Context, cmd *MyCommand, reply commands.ReplySender) error {
+    // Сохраняем адрес для ответа
+    addr := reply.Address()
+    h.saveReplyAddress(cmd.OrderID, addr)
+    // Не отправляем ответ сейчас — он будет отправлен позже
+    return nil
+}
+
+// Позже, в другом месте (например, по событию):
+func (h *Handler) OnPaymentCompleted(ctx context.Context, orderID string) error {
+    addr := h.loadReplyAddress(orderID)
+
+    // Создаём ReplySender из сохранённого адреса
+    sender := commands.NewReplySender(transport, codec, addr)
+    return sender.Send(ctx, &PaymentCompleted{OrderID: orderID})
+}
+```
+
+`ReplyAddress` содержит `CorrelationID` и `ReplyTo` — всё необходимое для маршрутизации ответа.
+
+**Обработка ошибок в SendError:**
+
+```go
+// *commands.ErrorPayload — структурированная ошибка, передаётся клиенту как есть
+reply.SendError(ctx, &commands.ErrorPayload{
+    Code:    "INSUFFICIENT_FUNDS",
+    Message: "not enough balance",
 })
+
+// Обычный error — оборачивается в ErrorPayload{Code: "UNKNOWN", Message: err.Error()}
+reply.SendError(ctx, fmt.Errorf("something went wrong"))
+```
+
+### Ошибки командной шины
+
+Предопределённые ошибки:
+
+| Ошибка | Описание |
+|--------|----------|
+| `ErrTimeout` | Ответ не получен в течение таймаута |
+| `ErrClientClosed` | Клиент закрыт, операция невозможна |
+| `ErrServerClosed` | Сервер закрыт |
+| `ErrAlreadyOpened` | Повторный вызов `Open()` |
+| `ErrNotOpened` | Вызов `Send`/`Close` до `Open()` |
+| `ErrAlreadyRegistered` | Повторная регистрация обработчика для того же имени команды |
+| `ErrServerStarted` | Регистрация обработчика после `Open()` |
+
+**ErrorPayload** — структурированная бизнес-ошибка, передаётся через transport:
+
+```go
+type ErrorPayload struct {
+    Code    string `json:"code"`
+    Message string `json:"message"`
+}
+```
+
+Предопределённые:
+- `ErrInternal` — `{Code: "INTERNAL", Message: "internal server error"}`
+- `ErrCommandNotFound` — `{Code: "COMMAND_NOT_FOUND", Message: "no handler registered"}`
+
+При ошибке декодирования команды или панике обработчика — автоматически отправляется `ErrInternal`.
+
+### Envelope-ы командной шины
+
+**CommandEnvelope** — обёртка команды для передачи через transport:
+
+```go
+type CommandEnvelope struct {
+    MessageID     string            `json:"message_id"`
+    CorrelationID string            `json:"correlation_id"`
+    CommandName   string            `json:"command_name"`
+    ReplyTo       string            `json:"reply_to"`
+    Headers       map[string]string `json:"headers,omitempty"`
+    Payload       []byte            `json:"payload"`
+}
+```
+
+**ReplyEnvelope** — обёртка ответа:
+
+```go
+type ReplyEnvelope struct {
+    CorrelationID string            `json:"correlation_id"`
+    ResultName    string            `json:"result_name,omitempty"`
+    Headers       map[string]string `json:"headers,omitempty"`
+    Payload       []byte            `json:"payload,omitempty"`
+    Error         *ErrorPayload     `json:"error,omitempty"`
+}
+```
+
+`MessageID` и `CorrelationID` генерируются автоматически (crypto/rand, 16 байт hex). `CorrelationID` связывает команду с ответом.
+
+### Commandbus Module (lifecycle)
+
+`commandbus.Module` — обёртка `app.Module` для lifecycle-управления клиентом и сервером:
+
+```go
+import "github.com/shuldan/framework/commandbus"
+
+module := commandbus.NewModule(
+    commandbus.WithClient(client),
+    commandbus.WithServer(server),
+)
+
+// Доступ к компонентам
+module.Client() // *commands.CommandClient
+module.Server() // *commands.CommandServer
+```
+
+Lifecycle:
+- `Init()` — no-op
+- `Start(ctx)` — вызывает `server.Open(ctx)`, затем `client.Open(ctx)`
+- `Stop(ctx)` — вызывает `client.Close(ctx)`, затем `server.Close(ctx)`
+
+Оба компонента опциональны — можно создать Module только с клиентом или только с сервером.
+
+### Полный пример Command Bus
+
+```go
+import (
+    "github.com/shuldan/commands"
+    jsoncodec "github.com/shuldan/commands/codec/json"
+    memtransport "github.com/shuldan/commands/transport/memory"
+    "github.com/shuldan/framework/commandbus"
+)
+
+// --- Transport и Codec ---
+transport := memtransport.New()
+codec := jsoncodec.New()
+
+// --- Server ---
+server, _ := commands.NewCommandServer(transport, codec,
+    commands.WithServerLogger(log),
+)
+
+commands.Register[*CreatePayment](server, &CreatePaymentHandler{
+    service: paymentService,
+})
+
+// --- Client ---
+client, _ := commands.NewCommandClient(transport, codec,
+    commands.WithTimeout(30 * time.Second),
+    commands.WithClientLogger(log),
+)
+
+// --- Module (lifecycle) ---
+module := commandbus.NewModule(
+    commandbus.WithClient(client),
+    commandbus.WithServer(server),
+)
+
+// --- Отправка команды ---
+future, err := commands.Send[*PaymentCreated](ctx, client, &CreatePayment{
+    OrderID: "order-123",
+    Amount:  1500,
+})
+
+payment, err := future.Await(ctx)
+// payment.PaymentID, payment.Status
 ```
 
 ---
@@ -1360,12 +1415,12 @@ func (m *OrderModule) Migrations(runner *migration.Runner) {
 ```go
 // Полный сервер: HTTP + Events + Commands + Queue
 command.Serve("myapp", log, 15*time.Second,
-    dbm, bus, cmdBus, server, qw,
+    dbm, bus, cmdModule, server, qw,
 )
 
 // Только воркеры очередей (без HTTP)
 command.QueueWork("myapp", log, 15*time.Second,
-    dbm, bus, cmdBus, qw,
+    dbm, bus, cmdModule, qw,
 )
 ```
 
@@ -1449,6 +1504,11 @@ import (
     "time"
 
     "github.com/shuldan/cli"
+    "github.com/shuldan/commands"
+    jsoncodec "github.com/shuldan/commands/codec/json"
+    memcmdtransport "github.com/shuldan/commands/transport/memory"
+    "github.com/shuldan/events"
+    eventmiddleware "github.com/shuldan/events/middleware"
 
     "github.com/shuldan/framework"
     "github.com/shuldan/framework/command"
@@ -1460,11 +1520,9 @@ import (
     "github.com/shuldan/framework/migration"
     "github.com/shuldan/framework/queueworker"
 
-    memorymq "github.com/shuldan/queue/broker/memory"
-
     "myapp/internal/module/order"
-    "myapp/internal/module/user"
     "myapp/internal/module/payment"
+    "myapp/internal/module/user"
 )
 
 func main() {
@@ -1492,30 +1550,55 @@ func main() {
     })
 
     bus := framework.NewLazy(func() (*eventbus.Module, error) {
-        return eventbus.NewModule(eventbus.Config{
-            Async:      cfg.GetBool("events.async", true),
-            Workers:    cfg.GetInt("events.workers", 8),
-            BufferSize: cfg.GetInt("events.buffer_size", 256),
-        }), nil
+        dispatcher := events.New(
+            events.WithAsyncMode(),
+            events.WithWorkerPool(cfg.GetInt("events.workers", 8)),
+            events.WithErrorHandler(func(_ context.Context, event events.Event, err error) {
+                log.Error("event handler failed", "event", fmt.Sprintf("%T", event), "error", err)
+            }),
+            events.WithMiddleware(
+                eventmiddleware.NewRecovery(),
+                eventmiddleware.NewLogging(log),
+            ),
+        )
+        return eventbus.NewModule(dispatcher), nil
     })
 
-    cmdBus := framework.NewLazy(func() (*commandbus.Module, error) {
-        return commandbus.NewModule(commandbus.Config{
-            Async:      cfg.GetBool("commands.async", true),
-            Workers:    cfg.GetInt("commands.workers", 4),
-            BufferSize: cfg.GetInt("commands.buffer_size", 128),
-        }), nil
+    cmdTransport := framework.NewLazy(func() (*memcmdtransport.Transport, error) {
+        return memcmdtransport.New(), nil
     })
 
-    broker := framework.NewLazy(func() (*memorymq.Broker, error) {
-        return memorymq.New(), nil  // или redisBroker.New(...)
+    cmdModule := framework.NewLazy(func() (*commandbus.Module, error) {
+        t := cmdTransport.MustGet()
+        codec := jsoncodec.New()
+
+        server, err := commands.NewCommandServer(t, codec,
+            commands.WithServerLogger(log),
+        )
+        if err != nil {
+            return nil, err
+        }
+
+        client, err := commands.NewCommandClient(t, codec,
+            commands.WithTimeout(30*time.Second),
+            commands.WithClientLogger(log),
+        )
+        if err != nil {
+            return nil, err
+        }
+
+        return commandbus.NewModule(
+            commandbus.WithClient(client),
+            commandbus.WithServer(server),
+        ), nil
     })
 
     // ─── Lazy DDD Modules ────────────────────
     orderMod := framework.NewLazy(func() (*order.Module, error) {
         db := dbm.MustGet()
         ev := bus.MustGet()
-        return order.NewModule(db.Default(), ev.Dispatcher(), cfg), nil
+        cm := cmdModule.MustGet()
+        return order.NewModule(db.Default(), ev.Dispatcher(), cm.Client(), cfg), nil
     })
 
     userMod := framework.NewLazy(func() (*user.Module, error) {
@@ -1525,8 +1608,8 @@ func main() {
 
     paymentMod := framework.NewLazy(func() (*payment.Module, error) {
         db := dbm.MustGet()
-        br := broker.MustGet()
-        return payment.NewModule(db.Default(), br, cfg), nil
+        cm := cmdModule.MustGet()
+        return payment.NewModule(db.Default(), cm.Server(), cfg), nil
     })
 
     // ─── Serve Command ──────────────────────
@@ -1534,11 +1617,10 @@ func main() {
         return command.Serve("myapp", log, 15*time.Second, func() []app.Module {
             db := dbm.MustGet()
             ev := bus.MustGet()
-            cb := cmdBus.MustGet()
+            cm := cmdModule.MustGet()
             om := orderMod.MustGet()
             um := userMod.MustGet()
             pm := paymentMod.MustGet()
-            br := broker.MustGet()
 
             // Router
             router := httpserver.NewRouter()
@@ -1558,59 +1640,15 @@ func main() {
             om.Listeners(ev.Dispatcher())
             pm.Listeners(ev.Dispatcher())
 
-            // OutboundRelay — события → очередь
-            outbound := eventbus.NewOutboundRelay(ev.Dispatcher(), br, log,
-                eventbus.WithSource("myapp"),
-            )
-            om.Relays(outbound)
-
-            // InboundRelay — очередь → события
-            inbound := eventbus.NewInboundRelay(ev.Dispatcher(), br, log,
-                eventbus.WithServiceName("myapp"),
-            )
-            pm.InboundRelays(inbound)
-
-            // CommandSender — команды → очередь
-            sender := commandbus.NewCommandSender(br, log,
-                commandbus.WithSender("myapp"),
-                commandbus.WithReplyTo("myapp"),
-            )
-            om.CommandRoutes(sender)
-
-            // CommandReceiver — очередь → выполнение
-            receiver := commandbus.NewCommandReceiver(br, log)
-            pm.CommandHandlers(receiver)
-
-            // ReplyListener — ответы → callback
-            replyListener := commandbus.NewReplyListener(br, log,
-                commandbus.WithListenerServiceName("myapp"),
-            )
-            om.ReplyHandlers(replyListener)
+            // Commands
+            pm.CommandHandlers(cm.Server())
+            om.CommandSenders(cm.Client())
 
             // Queue Workers
             qw := queueworker.NewModule(log)
             pm.Consumers(qw)
 
-            // Inbound event consumers
-            for _, topic := range inbound.Topics() {
-                qw.Register(queueworker.Registration{
-                    Name: "inbound-" + topic,
-                    Run:  inbound.RunTopic(topic),
-                })
-            }
-
-            // Command receiver consumers
-            for _, reg := range receiver.Registrations() {
-                qw.Register(reg)
-            }
-
-            // Reply listener consumer
-            qw.Register(queueworker.Registration{
-                Name: "reply-listener",
-                Run:  replyListener.Run,
-            })
-
-            return []app.Module{db, ev, cb, server, qw}
+            return []app.Module{db, ev, cm, server, qw}
         }())
     }
 
@@ -1637,7 +1675,7 @@ func main() {
 
     // ─── Shutdown ───────────────────────────
     k.OnShutdown(func() {
-        broker.IfCreated(func(b *memorymq.Broker) { _ = b.Close() })
+        cmdTransport.IfCreated(func(t *memcmdtransport.Transport) { _ = t.Close(context.Background()) })
         dbm.IfCreated(func(m *database.Manager) { _ = m.Stop(context.Background()) })
     })
 
@@ -1686,10 +1724,9 @@ func main() {
     k, _ := framework.NewKernel(framework.WithConfigFile("config.yaml"))
 
     dbm, _ := database.NewManager(configs, k.Logger())
-    broker := redisBroker.New(redisClient)
 
     qw := queueworker.NewModule(k.Logger())
-    paymentMod := payment.NewModule(dbm.Default(), broker, k.Config())
+    paymentMod := payment.NewModule(dbm.Default(), k.Config())
     paymentMod.Consumers(qw)
 
     k.Command(command.QueueWork("worker", k.Logger(), 15*time.Second, dbm, qw))
@@ -1697,88 +1734,35 @@ func main() {
 }
 ```
 
-### Микросервис с двусторонним Event Bridge
+### Микросервис с Command Bus
 
 ```go
 func main() {
     k, _ := framework.NewKernel(framework.WithConfigFile("config.yaml"))
     log := k.Logger()
 
-    bus := eventbus.NewModule(eventbus.Config{Async: true, Workers: 4})
-    broker := redisBroker.New(redisClient)
+    transport := memtransport.New()
+    codec := jsoncodec.New()
 
-    // Outbound: наши события → очередь
-    outbound := eventbus.NewOutboundRelay(bus.Dispatcher(), broker, log,
-        eventbus.WithSource("payment-service"),
+    // --- Payment Service: Server ---
+    server, _ := commands.NewCommandServer(transport, codec,
+        commands.WithServerLogger(log),
     )
-    outbound.Forward("PaymentCompleted", "payment.completed")
-    outbound.Forward("PaymentFailed", "payment.failed")
+    commands.Register[*CreatePayment](server, &CreatePaymentHandler{})
+    commands.Register[*RefundPayment](server, &RefundPaymentHandler{})
 
-    // Inbound: чужие события → наш Dispatcher
-    inbound := eventbus.NewInboundRelay(bus.Dispatcher(), broker, log,
-        eventbus.WithServiceName("payment-service"),  // пропускаем свои
-    )
-    inbound.On("order.created", "OrderCreated", deserializeOrderCreated)
-    inbound.On("order.cancelled", "OrderCancelled", deserializeOrderCancelled)
-
-    // Локальные обработчики входящих событий
-    events.SubscribeFunc(bus.Dispatcher(), handleOrderCreated)
-    events.SubscribeFunc(bus.Dispatcher(), handleOrderCancelled)
-
-    // Queue Worker
-    qw := queueworker.NewModule(log)
-    for _, topic := range inbound.Topics() {
-        qw.Register(queueworker.Registration{
-            Name: "inbound-" + topic,
-            Run:  inbound.RunTopic(topic),
-        })
-    }
-
-    k.Command(command.Serve("payment-svc", log, 15*time.Second, bus, qw))
-    k.Run(context.Background(), os.Args[1:])
-}
-```
-
-### Микросервис с Command Bus (request/reply)
-
-```go
-func main() {
-    k, _ := framework.NewKernel(framework.WithConfigFile("config.yaml"))
-    log := k.Logger()
-
-    broker := redisBroker.New(redisClient)
-
-    // ─── Command Sender (отправляем команды в Payment Service) ───
-    sender := commandbus.NewCommandSender(broker, log,
-        commandbus.WithSender("order-service"),
-        commandbus.WithReplyTo("order-service"),
-        commandbus.WithDefaultTimeout(30 * time.Second),
-    )
-    sender.Forward("CreatePayment")
-    sender.Forward("RefundPayment")
-
-    // ─── Reply Listener (получаем ответы) ───
-    replyListener := commandbus.NewReplyListener(broker, log,
-        commandbus.WithListenerServiceName("order-service"),
-    )
-    replyListener.OnResult("CreatePayment", deserializePaymentResult,
-        func(ctx context.Context, result commands.Result, err error) error {
-            if err != nil {
-                return orderService.MarkPaymentFailed(ctx, err)
-            }
-            r := result.(*PaymentCreated)
-            return orderService.AttachPayment(ctx, r.PaymentID)
-        },
+    // --- Order Service: Client ---
+    client, _ := commands.NewCommandClient(transport, codec,
+        commands.WithTimeout(30*time.Second),
+        commands.WithClientLogger(log),
     )
 
-    // ─── Queue Worker ───
-    qw := queueworker.NewModule(log)
-    qw.Register(queueworker.Registration{
-        Name: "reply-listener",
-        Run:  replyListener.Run,
-    })
+    module := commandbus.NewModule(
+        commandbus.WithClient(client),
+        commandbus.WithServer(server),
+    )
 
-    k.Command(command.Serve("order-svc", log, 15*time.Second, qw))
+    k.Command(command.Serve("payment-svc", log, 15*time.Second, module))
     k.Run(context.Background(), os.Args[1:])
 }
 ```
@@ -1821,16 +1805,32 @@ internal/module/order/
 // internal/module/order/module.go
 package order
 
+import (
+    "context"
+
+    "github.com/shuldan/commands"
+    "github.com/shuldan/events"
+
+    "github.com/shuldan/framework/httpserver"
+    "github.com/shuldan/framework/migration"
+)
+
 type Module struct {
     interactor *interactor.OrderInteractor
     repo       *persistence.OrderRepository
+    client     *commands.CommandClient
 }
 
-func NewModule(db *sql.DB, dispatcher *events.Dispatcher, cfg config.ConfigProvider) *Module {
+func NewModule(
+    db *sql.DB,
+    dispatcher *events.Dispatcher,
+    client *commands.CommandClient,
+    cfg config.ConfigProvider,
+) *Module {
     repo := persistence.NewOrderRepository(db, repository.Postgres())
     publisher := adapter.NewEventPublisher(dispatcher)
-    inter := interactor.New(repo, publisher, cfg)
-    return &Module{interactor: inter, repo: repo}
+    inter := interactor.New(repo, publisher, client, cfg)
+    return &Module{interactor: inter, repo: repo, client: client}
 }
 
 func (m *Module) Routes(router *httpserver.Router) {
@@ -1841,28 +1841,66 @@ func (m *Module) Routes(router *httpserver.Router) {
 }
 
 func (m *Module) Listeners(d *events.Dispatcher) {
-    events.SubscribeFunc(d, m.onPaymentReceived)
+    events.Subscribe[*PaymentCompleted](d, &onPaymentCompleted{
+        interactor: m.interactor,
+    })
 }
 
-func (m *Module) Relays(outbound *eventbus.OutboundRelay) {
-    outbound.Forward("OrderCreated", "order.created")
-    outbound.Forward("OrderCancelled", "order.cancelled")
-}
-
-func (m *Module) InboundRelays(inbound *eventbus.InboundRelay) {
-    inbound.On("payment.completed", "PaymentCompleted", m.deserializePaymentCompleted)
-}
-
-func (m *Module) CommandRoutes(sender *commandbus.CommandSender) {
-    sender.Forward("CreatePayment")
-}
-
-func (m *Module) ReplyHandlers(listener *commandbus.ReplyListener) {
-    listener.OnResult("CreatePayment", m.deserializePaymentResult, m.onPaymentResult)
+func (m *Module) CommandSenders(client *commands.CommandClient) {
+    // Команды отправляются из interactor через client
+    // Регистрация маршрутов не нужна — client.Send() принимает любую команду
 }
 
 func (m *Module) Migrations(runner *migration.Runner) {
     runner.Register("default", m.migrations()...)
+}
+```
+
+```go
+// internal/module/payment/module.go
+package payment
+
+import (
+    "github.com/shuldan/commands"
+
+    "github.com/shuldan/framework/queueworker"
+)
+
+type Module struct {
+    service *PaymentService
+}
+
+func NewModule(
+    db *sql.DB,
+    server *commands.CommandServer,
+    cfg config.ConfigProvider,
+) *Module {
+    service := NewPaymentService(db, cfg)
+    m := &Module{service: service}
+    m.registerCommandHandlers(server)
+    return m
+}
+
+func (m *Module) registerCommandHandlers(server *commands.CommandServer) {
+    commands.Register[*CreatePayment](server, &CreatePaymentHandler{
+        service: m.service,
+    })
+    commands.Register[*RefundPayment](server, &RefundPaymentHandler{
+        service: m.service,
+    })
+}
+
+func (m *Module) Listeners(d *events.Dispatcher) {
+    events.Subscribe[*OrderCreated](d, &onOrderCreated{
+        service: m.service,
+    })
+}
+
+func (m *Module) Consumers(qw *queueworker.Module) {
+    qw.Register(queueworker.Registration{
+        Name: "payment-processor",
+        Run:  m.processPayments,
+    })
 }
 ```
 
@@ -1901,26 +1939,10 @@ shuldan/framework/
 │       └── cors.go            — CORS
 │
 ├── eventbus/
-│   ├── config.go              — Config → events.Option
-│   ├── module.go              — Module: app.Module
-│   ├── envelope.go            — Envelope: стандартный формат событий
-│   ├── logger.go              — Logger interface
-│   ├── outbound.go            — OutboundRelay: Event → Queue
-│   ├── outbound_option.go     — WithSource, WithFilter, WithTransform
-│   ├── inbound.go             — InboundRelay: Queue → Event
-│   └── inbound_option.go      — WithServiceName
+│   └── module.go              — Module: app.Module (обёртка events.Dispatcher)
 │
 ├── commandbus/
-│   ├── config.go              — Config → commands.Option
-│   ├── module.go              — Module: app.Module (локальный диспетчер)
-│   ├── envelope.go            — CommandEnvelope, ResultEnvelope
-│   ├── logger.go              — Logger interface
-│   ├── outbound.go            — CommandSender: Command → Queue
-│   ├── outbound_option.go     — WithSender, WithReplyTo, WithDefaultTimeout
-│   ├── inbound.go             — CommandReceiver: Queue → Execute → Reply
-│   ├── inbound_option.go      — WithIdempotencyStore, WithIdempotencyTTL
-│   ├── reply_listener.go      — ReplyListener: Reply Queue → Callback
-│   └── reply_listener_option.go — WithListenerServiceName
+│   └── module.go              — Module: app.Module (client + server lifecycle)
 │
 ├── queueworker/
 │   └── module.go              — Module: app.BackgroundModule
@@ -1938,6 +1960,44 @@ shuldan/framework/
     ├── migrate_plan.go        — migrate:plan
     ├── health.go              — health (HealthChecker interface)
     └── config_dump.go         — config:dump
+```
+
+### Внешние пакеты
+
+```
+shuldan/commands/                      — командная шина
+├── command.go                         — Command, Result интерфейсы
+├── envelope.go                        — CommandEnvelope, ReplyEnvelope, ReplyAddress
+├── errors.go                          — ErrorPayload, ErrTimeout, ErrClientClosed, ...
+├── transport.go                       — Transport, CommandHandler, ReplyHandler
+├── codec.go                           — Codec интерфейс
+├── client.go                          — CommandClient, Send[R](), ClientOption, SendOption
+├── server.go                          — CommandServer, Register[C](), ServerOption
+├── handler.go                         — Handler[C], ReplySender
+├── reply_sender.go                    — replySender, NewReplySender
+├── future.go                          — Future, TypedFuture[R], future, typedFuture[R]
+├── logger.go                          — Logger интерфейс
+├── codec/json/                        — JSON Codec
+└── transport/memory/                  — In-memory Transport
+
+shuldan/events/                        — шина событий
+├── event.go                           — Event, KeyedEvent
+├── handler.go                         — Handler[E]
+├── dispatcher.go                      — Dispatcher, New(), Publish, PublishAll, Close
+├── subscribe.go                       — Subscribe[E](), Subscription
+├── subscribe_options.go               — WithRetry, WithTimeout, WithSubscribeMiddleware
+├── options.go                         — WithAsyncMode, WithWorkerPool, WithMiddleware, ...
+├── middleware.go                      — Next, Middleware, buildChain
+├── transport.go                       — Transport, Envelope, TransportHandler
+├── codec.go                           — Codec
+├── retry.go                           — RetryPolicy
+├── errors.go                          — ErrDispatcherClosed, ErrNilHandler
+├── middleware/
+│   ├── logging.go                     — NewLogging
+│   ├── metrics.go                     — NewMetrics, InMemoryRecorder
+│   └── recovery.go                    — NewRecovery
+├── codec/                             — JSON Codec
+└── transport/memory/                  — In-memory Transport
 ```
 
 ---
@@ -1966,24 +2026,6 @@ database:
       max_open_conns: 25
       max_idle_conns: 5
       conn_max_lifetime: 5m
-
-events:
-  async: true
-  workers: 8
-  buffer_size: 256
-  ordered: false
-
-commands:
-  async: true
-  workers: 4
-  buffer_size: 128
-  ordered: false
-
-queue:
-  broker: memory
-  workers: 4
-  max_retries: 3
-  dlq: true
 
 log:
   level: info
