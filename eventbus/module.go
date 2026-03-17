@@ -10,9 +10,9 @@ type Module struct {
 	dispatcher *events.Dispatcher
 }
 
-func NewModule(cfg Config) *Module {
+func NewModule(dispatcher *events.Dispatcher) *Module {
 	return &Module{
-		dispatcher: events.New(buildOpts(cfg)...),
+		dispatcher: dispatcher,
 	}
 }
 
