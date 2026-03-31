@@ -163,7 +163,7 @@ func main() {
     router.Use(
         middleware.Recovery(log.Error),
         middleware.RequestID(),
-        middleware.Logging(log.Info),
+        middleware.Logging(log),
     )
     router.GET("/ping", func(w http.ResponseWriter, _ *http.Request) {
         httpserver.OK(w, map[string]string{"status": "ok"})
@@ -331,7 +331,7 @@ router := httpserver.NewRouter()
 router.Use(
     middleware.Recovery(log.Error),
     middleware.RequestID(),
-    middleware.Logging(log.Info),
+    middleware.Logging(log),
 )
 
 // Маршруты
@@ -440,7 +440,7 @@ id := middleware.IDFromContext(r.Context())
 **Logging** — логирование запросов:
 
 ```go
-middleware.Logging(log.Info)
+middleware.Logging(log)
 ```
 
 Логирует: method, path, status, duration, request_id.
